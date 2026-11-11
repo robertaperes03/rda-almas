@@ -1,10 +1,10 @@
 // Guarda o aplicativo no celular para abrir sem internet.
-var CACHE = 'rda-almas-v2';
+var CACHE = 'rda-almas-v3';
 var SHELL = ['./', 'index.html', 'style.css', 'config.js', 'db.js', 'app.js', 'admin.js', 'pdf.js', 'logo.jpg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'pdf-lib.min.js', 'pdfa.js', 'jszip.min.js', 'xlsxw.js', 'xlsxr.js'];
 var LAZY = ['pdf-lib.min.js', 'pdfa.js', 'jszip.min.js', 'xlsxw.js'];
 
 self.addEventListener('install', function (e) {
-  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));
+  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL.map(function (u) { return new Request(u, { cache: 'reload' }); })); }).then(function () { return self.skipWaiting(); }));
 });
 self.addEventListener('activate', function (e) {
   e.waitUntil(caches.keys().then(function (ks) {
@@ -18,7 +18,8 @@ self.addEventListener('fetch', function (e) {
   var same = url.indexOf(self.location.origin) === 0;
   if (!same) return;
   // rede primeiro (pega atualizações), cai para o cache sem internet
-  e.respondWith(fetch(e.request).then(function (r) {
+  // no-cache: sempre confere com o servidor se há versão nova (evita arquivo antigo guardado)
+  e.respondWith(fetch(e.request, { cache: 'no-cache' }).then(function (r) {
     if (r && r.ok) { var cp = r.clone(); caches.open(CACHE).then(function (c) { c.put(e.request, cp); }); }
     return r;
   }).catch(function () {
