@@ -1,6 +1,6 @@
 // Guarda o aplicativo no celular para abrir sem internet.
-var CACHE = 'rda-almas-v1';
-var SHELL = ['./', 'index.html', 'style.css', 'config.js', 'db.js', 'app.js', 'admin.js', 'pdf.js', 'logo.jpg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest'];
+var CACHE = 'rda-almas-v2';
+var SHELL = ['./', 'index.html', 'style.css', 'config.js', 'db.js', 'app.js', 'admin.js', 'pdf.js', 'logo.jpg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'pdf-lib.min.js', 'pdfa.js', 'jszip.min.js', 'xlsxw.js', 'xlsxr.js'];
 var LAZY = ['pdf-lib.min.js', 'pdfa.js', 'jszip.min.js', 'xlsxw.js'];
 
 self.addEventListener('install', function (e) {

@@ -215,13 +215,15 @@
     opts = opts || {};
     var start = newDocPage(doc), p = new Pdf(doc);
     p.ctx = { titulo: 'PERMISSÃO PARA HORAS EXTRAS' };
-    p.y = simpleHeader(p, 'PERMISSÃO PARA HORAS EXTRAS', 'DATA:  ' + br(String(h.pedidoEm || '').slice(0, 10)), opts.logo);
+    p.y = simpleHeader(p, 'PERMISSÃO PARA HORAS EXTRAS', 'DATA:  ' + br(String(h.pedidoEm || '').slice(0, 10)) + '\n(emissão)', opts.logo);
     var w5 = [30, 56, 22, 50, CW - 158];
     p.cols(['Data prevista:', 'Encarregado:', 'Turno:', 'Área:', 'Responsável:'], w5, p.y, 5, { bold: true, fill: GRAY, size: 7 }); p.y += 5;
     p.cols([br(h.date), { t: h.enc, size: 6.8 }, h.turno || 'DIURNO', { t: h.area || '', wrap: true, size: 6.5 }, { t: h.supervisor || '', size: 6.5 }], w5, p.y, 7, { size: 7.5 }); p.y += 7;
-    var tipo = h.tipo === 'ESCALA' ? 'ESCALA EM DIA NÃO ÚTIL' : 'EXTENSÃO DE HORÁRIO';
-    var mh = Math.max(7, p.lines(h.motivo, CW - 90, 7.5) * 3.3 + 2);
-    p.cols([{ t: 'Tipo: ' + tipo, bold: true }, { t: 'Horário: ' + (h.ini || '') + ' às ' + (h.fim || ''), bold: true }, { t: 'Atividade: ' + (h.motivo || ''), align: 'left', wrap: true, size: 7.5 }], [45, 45, CW - 90], p.y, mh, { size: 7.5 }); p.y += mh + 2;
+    var tipo = h.tipo === 'ESCALA' ? 'ESCALA (DIA NÃO ÚTIL)' : 'EXTENSÃO DE HORÁRIO';
+    p.cols([{ t: 'Tipo: ' + tipo, bold: true }, { t: 'Horário: ' + (h.ini || '') + ' às ' + (h.fim || ''), bold: true }], [CW / 2, CW / 2], p.y, 6, { size: 8 }); p.y += 6;
+    var mh = Math.max(9, p.lines(h.motivo, CW - 4, 8) * 3.5 + 3);
+    p.cell('ATIVIDADE A SER REALIZADA NAS HORAS EXTRAS', M, p.y, CW, 4.5, { bold: true, fill: GRAY, size: 7 }); p.y += 4.5;
+    p.cell(h.motivo || '', M, p.y, CW, mh, { align: 'left', wrap: true, size: 8, color: [10, 30, 120] }); p.y += mh + 2;
     var widths = [12, 16, 66, 16, 16, 42, CW - 168];
     var x = M, hh = 4;
     ['ITEM', 'CHAPA', 'NOME'].forEach(function (t, i) { p.cell(t, x, p.y, widths[i], hh * 2, { bold: true, fill: GRAY }); x += widths[i]; });
@@ -263,7 +265,7 @@
     p.ctx = { titulo: 'ESCALA HORA EXTRA' };
     var horarios = {}; pedidos.forEach(function (h) { horarios[h.ini + ' às ' + h.fim] = 1; });
     var hk = Object.keys(horarios);
-    p.y = simpleHeader(p, 'ESCALA HORA EXTRA', 'Data da atividade:\n' + br(date), opts.logo);
+    p.y = simpleHeader(p, 'LISTA NOMINAL DE HORA EXTRA', 'Data da atividade:\n' + br(date), opts.logo);
     p.cols([{ t: 'Horário:', bold: true }, hk.length === 1 ? hk[0] : 'conforme lista abaixo', { t: 'Pessoas:', bold: true }, String(pedidos.reduce(function (a, h) { return a + (h.pessoas || []).length; }, 0))], [30, 90, 30, CW - 150], p.y, 6, { size: 8 }); p.y += 8;
     var widths = [8, 12, 46, 26, 10, 18, 18, 18, 8, 8, CW - 172], hh = 4, RH = 7;
     var hdr = function () {

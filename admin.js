@@ -168,7 +168,7 @@
           jobs.push(function () {
             return api('admin_photo', { fileId: f.fileId }, 120000).then(function (ph) {
               var desc = a.desc || (a.tipo ? U().MURO_ATIVS[a.tipo - 1] : '');
-              fotos.push({ data: ph.data, caption: 'Atividade ' + (ai + 1) + ' – ' + desc + (f.takenAt ? '  ·  ' + f.takenAt : '') });
+              fotos.push({ data: ph.data, caption: 'Atividade ' + (ai + 1) + ' – ' + desc + (f.takenAt ? '  ·  ' + f.takenAt : '') + (f.fileName ? '\n' + f.fileName : '') });
             }).catch(function () { });
           });
         });
