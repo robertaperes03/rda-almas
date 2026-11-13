@@ -1,5 +1,5 @@
 // Guarda o aplicativo no celular para abrir sem internet.
-var CACHE = 'rda-almas-v9';
+var CACHE = 'rda-almas-v10';
 importScripts('config.js');
 var SHELL = ['./', 'index.html', 'style.css', 'config.js', 'db.js', 'app.js', 'admin.js', 'pdf.js', 'logo.jpg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'admin.html', 'manifest-admin.webmanifest', 'pdf-lib.min.js', 'pdfa.js', 'jszip.min.js', 'xlsxw.js', 'xlsxr.js'];
 var LAZY = ['pdf-lib.min.js', 'pdfa.js', 'jszip.min.js', 'xlsxw.js'];
