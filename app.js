@@ -228,12 +228,13 @@
   function renderKey() {
     $app.innerHTML = '<h1>Bem-vindo ao RDA</h1><div class="card"><label class="f">Código de acesso da obra</label><input id="k" autocapitalize="characters" placeholder="Digite o código"><p class="small muted">Peça o código para o planejamento. Só é pedido uma vez.</p><button class="btn big" id="go">Entrar</button></div>';
     document.getElementById('go').onclick = function () {
-      var k = document.getElementById('k').value.trim(); if (!k) return;
+      var bt = this, k = document.getElementById('k').value.trim(); if (!k || bt.disabled) return;
+      bt.disabled = true; bt.textContent = 'Verificando…';
       S.key = k;
       toast('Verificando…');
       refreshBoot().then(function (ok) {
-        if (ok) { DB.put('kv', 'key', k); toast('Código aceito ✓', 1200); render(); }
-        else { S.key = ''; toast(navigator.onLine ? 'Código inválido' : 'Precisa de internet na primeira vez'); }
+        if (ok) { DB.put('kv', 'key', k); toast('Código aceito ✓', 1200); S.pickT = Date.now(); render(); }
+        else { S.key = ''; bt.disabled = false; bt.textContent = 'Entrar'; toast(navigator.onLine ? 'Código inválido' : 'Precisa de internet na primeira vez'); }
       });
     };
   }
@@ -249,12 +250,19 @@
       }).join('') || '<p class="empty">Nenhum nome encontrado</p>';
       [].forEach.call(document.querySelectorAll('#nl button'), function (b) {
         b.onclick = function () {
-          S.me = S.boot.encarregados.filter(function (e) { return e.nome === b.dataset.n; })[0];
-          DB.put('kv', 'me', S.me.nome); openDraft(today()); S.inbox = []; refreshInbox(); setTimeout(function () { tour(); }, 400);
+          if (Date.now() - (S.pickT || 0) < 1200) return; // toque repetido no botão Entrar
+          var e = S.boot.encarregados.filter(function (x) { return x.nome === b.dataset.n; })[0]; if (!e) return;
+          var sb = sheet('<h3>Confirme seu nome</h3><p style="font-size:18px;margin:6px 0 14px">Você é <b>' + esc(e.nome) + '</b>?<br><small class="muted">' + esc(e.disciplina) + '</small></p><button class="btn block orange" id="pkok">Sim, sou eu</button><button class="btn block ghost" id="pkno" style="margin-top:8px">Não, voltar à lista</button>');
+          sb.querySelector('#pkno').onclick = closeSheet;
+          sb.querySelector('#pkok').onclick = function () {
+            closeSheet(); S.me = e;
+            DB.put('kv', 'me', S.me.nome); openDraft(today()); S.inbox = []; refreshInbox(); revalidarPush(); setTimeout(function () { tour(); }, 400);
+          };
         };
       });
     }
     document.getElementById('q').oninput = function () { draw(this.value); };
+    S.pickT = Date.now();
     draw('');
   }
 
