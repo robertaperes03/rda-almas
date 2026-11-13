@@ -5,7 +5,7 @@
   var A = { pass: sessionStorage.getItem('rda_admin') || '', tab: 'entregas', date: null, dias: 7, todos: false, de: null, ate: null, list: null };
   var DIAS = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
   var DIAS_EXT = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
-  var ABREV = { 'SEM ESCALA': 'S/E', 'DOMINGO / DSR': 'DSR', 'FERIADO': 'FER', 'FOLGA DE CAMPO': 'F.C', 'SEM ATIVIDADE': 'S/A', 'PARALISAÇÃO': 'PAR', 'PARALISAÇÃO CLIMÁTICA': 'CHU', 'AGUARDANDO LIBERAÇÃO': 'AG.L', 'FOLGA': 'FOL', 'FÉRIAS': 'FÉR', 'ATESTADO / MÉDICO': 'ATE', 'FALTA JUSTIFICADA': 'F.J', 'NÃO TEM RDA': 'N/T' };
+  var ABREV = { 'SEM ESCALA': 'S/E', 'DOMINGO / DSR': 'DSR', 'FERIADO': 'FER', 'FOLGA DE CAMPO': 'F.C', 'SEM ATIVIDADE': 'S/A', 'PARALISAÇÃO': 'PAR', 'PARALISAÇÃO CLIMÁTICA': 'CHU', 'AGUARDANDO LIBERAÇÃO': 'AG.L', 'FOLGA': 'FOL', 'FÉRIAS': 'FÉR', 'ATESTADO / MÉDICO': 'ATE', 'FALTA JUSTIFICADA': 'F.J', 'NÃO TEM RDA': 'N/T', 'ENTREGUE EM PAPEL': 'PAP' };
   function p2(n) { return ('0' + n).slice(-2); }
   function today() { var d = new Date(); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); }
   function addDays(s, n) { var d = new Date(s + 'T12:00:00'); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); }
@@ -40,6 +40,7 @@
     var fo = (j.folgas || []).filter(function (f) { return f.enc === e.nome && d >= f.ini && d <= f.fim; })[0];
     var sit = ov ? ov.s : (fo && !fo.subst ? 'FOLGA DE CAMPO' : diaUtil(d, j) || esc ? 'TRABALHO NORMAL' : dow(d) === 0 ? 'DOMINGO / DSR' : j.feriados.indexOf(d) >= 0 ? 'FERIADO' : 'SEM ESCALA');
     if (!e.cobra && !ov) sit = 'NÃO TEM RDA';
+    else if (!ov && !r && j.inicio && d < j.inicio && sit === 'TRABALHO NORMAL') sit = 'ENTREGUE EM PAPEL';
     var cobra = (j.listaSituacoes.filter(function (x) { return x[0] === sit; })[0] || [sit, true])[1];
     var prazo = prazoDe(e, d, j), agora = j.agora || (today() + ' 23:59');
     var out = { rda: r, sit: sit, obs: ov ? ov.o : (fo ? 'Folga de campo ' + br(fo.ini).slice(0, 5) + '–' + br(fo.fim).slice(0, 5) + (fo.subst ? ', RDA por ' + fo.subst : '') : ''), cobra: cobra || !!r, prevista: prazo.slice(0, 10), prazo: prazo, numero: r ? r.numero : numero(e, d) };
@@ -131,7 +132,7 @@
           return '<td class="na" data-sit="' + key + '" title="' + esc(c.sit + (c.obs ? ' – ' + c.obs : '')) + '"><small>' + esc(ABREV[c.sit] || c.sit.slice(0, 3)) + '</small></td>';
         }).join('') + '</tr>';
       });
-      h += '</tbody></table></div><p class="small muted">✓ entregue (toque para o PDF; laranja = entregue com atraso; azul = consta no RDA de outro encarregado) · … ainda no prazo (até 12:00 do próximo dia de atividade) · ✗ atrasado · siglas = situação que não cobra RDA (DSR, FER, F.C = folga de campo, PAR, CHU, N/T = não tem RDA…). Toque num dia sem RDA para mudar a situação.</p></div>';
+      h += '</tbody></table></div><p class="small muted">✓ entregue (toque para o PDF; laranja = entregue com atraso; azul = consta no RDA de outro encarregado) · … ainda no prazo (até 12:00 do próximo dia de atividade) · ✗ atrasado · siglas = situação que não cobra RDA (DSR, FER, F.C = folga de campo, PAR, CHU, N/T = não tem RDA, PAP = entregue em papel, antes da cobrança pelo app…). Toque num dia sem RDA para mudar a situação.</p></div>';
       document.getElementById('ent').innerHTML = h;
       [].forEach.call(document.querySelectorAll('td.ok'), function (td) { td.onclick = function () { pdfOne(td.dataset.id); }; });
       [].forEach.call(document.querySelectorAll('[data-sit]'), function (td) { td.onclick = function () { var k = td.dataset.sit.split('|'); situacao(j, k[0], k[1]); }; });
@@ -155,23 +156,26 @@
   function exportar() {
     var el = document.getElementById('adm');
     el.innerHTML = '<div class="card"><div class="grid2"><div><label class="f" style="margin-top:0">De</label><input type="date" id="de" value="' + A.de + '"></div><div><label class="f" style="margin-top:0">Até</label><input type="date" id="ate" value="' + A.ate + '"></div></div>' +
-      '<div class="row" style="margin-top:12px"><button class="btn ok" id="xls">📊 Planilha (.xlsx)</button><button class="btn" id="pdfall">📄 PDF de todos</button></div></div><div class="card" id="lst"><p class="empty">Carregando…</p></div>';
+      '<div class="row" style="margin-top:12px"><button class="btn ok" id="xls">📊 Planilha (.xlsx)</button><button class="btn" id="pdfall">📄 PDF de todos</button></div><button class="btn block" id="pdfarm" style="margin-top:8px;background:#00695c">🔩 Montagem de armação (PDF)</button></div><div class="card" id="lst"><p class="empty">Carregando…</p></div>';
     document.getElementById('de').onchange = function () { A.de = this.value; if (A.ate < A.de) A.ate = A.de; exportar(); };
     document.getElementById('ate').onchange = function () { A.ate = this.value; exportar(); };
     document.getElementById('xls').onclick = planilha;
     document.getElementById('pdfall').onclick = function () { pdfMany(A.list || []); };
+    document.getElementById('pdfarm').onclick = function () { pdfMany((A.list || []).filter(function (r) { return r.armacao; }), true); };
     api('admin_list', { de: A.de, ate: A.ate }).then(function (j) {
       A.list = j.rdas.sort(function (a, b) { return (a.date + a.disciplina + a.enc).localeCompare(b.date + b.disciplina + b.enc); });
       document.getElementById('lst').innerHTML = '<div class="card-h"><h2>' + A.list.length + ' RDA(s)</h2></div>' + (A.list.map(function (r) {
-        return '<div class="rdaline"><div class="tx"><b>' + esc(r.numero) + '</b><small>' + br(r.date) + ' · ' + esc(r.enc) + ' · ' + r.presentes + '/' + r.equipe + ' presentes · ' + r.atividades + ' ativ. · ' + r.fotos + ' fotos' + (r.versao > 1 ? ' · reenviado (v' + r.versao + ')' : '') + '</small></div><button class="btn sm" data-id="' + esc(r.id) + '">PDF</button></div>';
+        return '<div class="rdaline"><div class="tx"><b>' + esc(r.numero) + '</b><small>' + br(r.date) + ' · ' + esc(r.enc) + ' · ' + r.presentes + '/' + r.equipe + ' presentes · ' + r.atividades + ' ativ. · ' + r.fotos + ' fotos' + (r.versao > 1 ? ' · reenviado (v' + r.versao + ')' : '') + (r.armacao ? ' · 🔩 ' + r.armacao + ' linha(s) de armação' : '') + '</small></div>' + (r.armacao ? '<button class="btn sm" style="background:#00695c" data-arm="' + esc(r.id) + '">🔩</button>' : '') + '<button class="btn sm" data-id="' + esc(r.id) + '">PDF</button></div>';
       }).join('') || '<p class="empty">Nenhum RDA no período</p>');
       [].forEach.call(document.querySelectorAll('#lst [data-id]'), function (b) { b.onclick = function () { pdfOne(b.dataset.id); }; });
+      [].forEach.call(document.querySelectorAll('#lst [data-arm]'), function (b) { b.onclick = function () { pdfOne(b.dataset.arm, true); }; });
     }).catch(function (e) { document.getElementById('lst').innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
   }
 
-  function fetchFull(id) {
+  function fetchFull(id, semFotos) {
     return api('admin_get', { id: id }).then(function (j) {
       var r = j.rda, fotos = [], jobs = [];
+      if (semFotos) return { rda: r, assinatura: j.assinatura, fotos: [] };
       (r.atividades || []).forEach(function (a, ai) {
         (a.fotos || []).forEach(function (f) {
           if (!f.fileId) return;
@@ -187,28 +191,29 @@
     });
   }
   function prepPdf() { return loadScript('pdf-lib.min.js').then(function () { return Promise.all([loadScript('pdfa.js'), toDataURL('logo.jpg')]); }).then(function (x) { return x[1]; }); }
-  function pdfOne(id) {
+  function pdfOne(id, arm) {
     busy('Gerando PDF…');
     prepPdf().then(function (logo) {
-      return fetchFull(id).then(function (f) {
+      return fetchFull(id, arm).then(function (f) {
         return window.newPdfDoc().then(function (doc) {
+          if (arm) { window.buildArmacaoPdf(f.rda, { logo: logo }, doc); return doc.save(f.rda.date + ' - ' + f.rda.numero + ' - MONTAGEM DE ARMACAO.pdf'); }
           window.buildRdaPdf(f.rda, { logo: logo, assinatura: f.assinatura, fotos: f.fotos }, doc);
           return doc.save(f.rda.date + ' - ' + f.rda.numero + '.pdf');
         });
       });
     }).then(function () { done('PDF pronto ✓'); }).catch(function (e) { done('Erro: ' + e.message); });
   }
-  function pdfMany(list) {
-    if (!list.length) return done('Nenhum RDA no período');
+  function pdfMany(list, arm) {
+    if (!list.length) return done(arm ? 'Nenhuma montagem de armação no período' : 'Nenhum RDA no período');
     prepPdf().then(function (logo) {
       return window.newPdfDoc().then(function (doc) {
         var i = 0;
         return list.reduce(function (c, r) {
           return c.then(function () {
             busy('Gerando PDF ' + (++i) + ' de ' + list.length + '…');
-            return fetchFull(r.id).then(function (f) { window.buildRdaPdf(f.rda, { logo: logo, assinatura: f.assinatura, fotos: f.fotos }, doc); });
+            return fetchFull(r.id, arm).then(function (f) { if (arm) window.buildArmacaoPdf(f.rda, { logo: logo }, doc); else window.buildRdaPdf(f.rda, { logo: logo, assinatura: f.assinatura, fotos: f.fotos }, doc); });
           });
-        }, Promise.resolve()).then(function () { busy('Finalizando arquivo…'); return doc.save('RDAs ' + A.de + (A.ate !== A.de ? ' a ' + A.ate : '') + '.pdf'); });
+        }, Promise.resolve()).then(function () { busy('Finalizando arquivo…'); return doc.save((arm ? 'Montagem de armação ' : 'RDAs ') + A.de + (A.ate !== A.de ? ' a ' + A.ate : '') + '.pdf'); });
       });
     }).then(function () { done('PDF pronto ✓'); }).catch(function (e) { done('Erro: ' + e.message); });
   }
@@ -226,7 +231,7 @@
         });
       }
       sheets.push({ name: 'Controle de recebimento', rows: ctl });
-      var nomes = { RDA: 'RDAs', RDA_EFETIVO: 'Efetivo', RDA_ATIVIDADES: 'Atividades', RDA_EQUIPAMENTOS: 'Equipamentos', RDA_PARALISACOES: 'Paralisações', RDA_FOTOS: 'Fotos', HORA_EXTRA: 'Horas extras', HORA_EXTRA_PESSOAS: 'Horas extras - pessoas' };
+      var nomes = { RDA: 'RDAs', RDA_EFETIVO: 'Efetivo', RDA_ATIVIDADES: 'Atividades', RDA_EQUIPAMENTOS: 'Equipamentos', RDA_PARALISACOES: 'Paralisações', RDA_ARMACAO: 'Armação', RDA_FOTOS: 'Fotos', HORA_EXTRA: 'Horas extras', HORA_EXTRA_PESSOAS: 'Horas extras - pessoas' };
       Object.keys(nomes).forEach(function (k) { var tb = t[k]; if (tb) sheets.push({ name: nomes[k], rows: [tb.header].concat(tb.rows) }); });
       return window.makeXlsx(sheets).then(function (blob) { download(blob, 'RDA - Registros ' + A.de + (A.ate !== A.de ? ' a ' + A.ate : '') + '.xlsx'); done('Planilha pronta ✓'); });
     }).catch(function (e) { done('Erro: ' + e.message); });
@@ -521,7 +526,7 @@
     var ativos = j.encarregados.filter(function (e) { return e.ativo && ok(e); }), inat = j.encarregados.filter(function (e) { return !e.ativo && ok(e); });
     var linha = function (e) {
       return '<div class="rdaline" data-ed="' + esc(e.nome) + '" style="cursor:pointer"><div class="tx"><b>' + esc(e.nome) + '</b><small>' + esc(e.curto) + ' · ' + esc(e.disciplina) + (e.supervisor ? ' · sup. ' + esc(e.supervisor) : '') + ' · ' + e.equipe + ' na equipe</small></div>' +
-        (e.modelo === 'MURO' ? '<span class="tag">Muro</span>' : '') + (e.ativo ? (e.cobra ? '<span class="tag" style="background:#e6f4ea;color:#1e8e3e">Cobra RDA</span>' : '<span class="tag">Não cobra</span>') : '') + '<span class="muted">›</span></div>';
+        (e.modelo === 'MURO' ? '<span class="tag">Muro</span>' : '') + (e.armacao ? '<span class="tag" style="background:#e0f2f1;color:#00695c">🔩 Armação</span>' : '') + (e.ativo ? (e.cobra ? '<span class="tag" style="background:#e6f4ea;color:#1e8e3e">Cobra RDA</span>' : '<span class="tag">Não cobra</span>') : '') + '<span class="muted">›</span></div>';
     };
     var grupos = {}; ativos.forEach(function (e) { (grupos[e.disciplina] = grupos[e.disciplina] || []).push(e); });
     var h = '<div class="card"><div class="row" style="align-items:center"><input id="ebusca" placeholder="🔍 Procurar" value="' + esc(f) + '"><button class="btn" id="enovo" style="flex:0 0 auto">＋ Novo</button></div>' +
@@ -539,7 +544,7 @@
   }
 
   function encForm(e, j) {
-    var novo = !e; e = e || { nome: '', curto: '', disciplina: '', supervisor: '', modelo: 'PADRAO', ativo: true, cobra: true, equipe: 0 };
+    var novo = !e; e = e || { nome: '', curto: '', disciplina: '', supervisor: '', modelo: 'PADRAO', ativo: true, cobra: true, armacao: false, equipe: 0 };
     var b = sheetUI('<h3>' + (novo ? 'Novo encarregado' : 'Editar encarregado') + '</h3>' +
       '<label class="f" style="margin-top:0">Nome completo</label><input id="cn" value="' + esc(e.nome) + '" autocapitalize="characters">' +
       '<label class="f">Nome curto</label><input id="cc" value="' + esc(e.curto) + '" autocapitalize="characters" placeholder="Ex.: ' + esc((e.nome || 'MARCIO JOEL').split(' ').slice(0, 2).join(' ')) + '"><p class="small muted" style="margin:4px 0 0">Vai no número do RDA: RDA-' + esc(e.cod || 'CIV') + '-<b>NOME CURTO</b>-0001' + (novo ? '' : '. Mudar o nome curto muda o número dos próximos RDAs.') + '</p>' +
@@ -547,9 +552,10 @@
       '<label class="f">Supervisor</label><input id="cs" list="csl" value="' + esc(e.supervisor) + '" autocapitalize="characters" placeholder="Escolha ou digite"><datalist id="csl">' + j.supervisores.map(function (d) { return '<option value="' + esc(d) + '">'; }).join('') + '</datalist>' +
       '<label class="f">Modelo de RDA</label><select id="cm"><option value="PADRAO"' + (e.modelo !== 'MURO' ? ' selected' : '') + '>Padrão</option><option value="MURO"' + (e.modelo === 'MURO' ? ' selected' : '') + '>Muro (fiadas)</option></select>' +
       '<label class="person" style="cursor:pointer;margin-top:10px"><input type="checkbox" id="cb"' + (e.cobra ? ' checked' : '') + ' style="width:28px;height:28px;min-height:0;flex:0 0 28px"><div class="pinfo"><b>Cobrar RDA</b><small>Entra no controle de recebimento e recebe os alertas de prazo</small></div></label>' +
+      '<label class="person" style="cursor:pointer;margin-top:10px"><input type="checkbox" id="carm"' + (e.armacao ? ' checked' : '') + ' style="width:28px;height:28px;min-height:0;flex:0 0 28px"><div class="pinfo"><b>🔩 Relatório de montagem de armação</b><small>Mostra o botão MONTAGEM DE ARMAÇÃO no RDA deste encarregado</small></div></label>' +
       '<div class="row" style="margin-top:14px">' + (novo ? '' : '<button class="btn ' + (e.ativo ? 'danger' : 'ghost') + '" id="cat">' + (e.ativo ? 'Desativar' : 'Reativar') + '</button>') + '<button class="btn" id="cok">' + (novo ? 'Cadastrar' : 'Salvar') + '</button></div>');
     var val = function () {
-      return { nome: b.querySelector('#cn').value, curto: b.querySelector('#cc').value, disciplina: b.querySelector('#cd').value, supervisor: b.querySelector('#cs').value, modelo: b.querySelector('#cm').value, cobra: b.querySelector('#cb').checked, ativo: e.ativo };
+      return { nome: b.querySelector('#cn').value, curto: b.querySelector('#cc').value, disciplina: b.querySelector('#cd').value, supervisor: b.querySelector('#cs').value, modelo: b.querySelector('#cm').value, cobra: b.querySelector('#cb').checked, armacao: b.querySelector('#carm').checked, ativo: e.ativo };
     };
     var enviar = function (v, hist) {
       busy('Salvando…');

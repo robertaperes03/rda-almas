@@ -211,6 +211,41 @@
   }
   function newDocPage(doc) { if (doc.__used) doc.addPage(); doc.__used = true; return doc.getNumberOfPages(); }
 
+
+  /* ---------- Montagem de armação (modelo Parex) ---------- */
+  function nfmt(v, dec) { var n = Number(String(v == null ? '' : v).replace(',', '.')); if (v === '' || v == null || isNaN(n)) return ''; return n.toFixed(dec).replace('.', ','); }
+  function armPages(p, r, logo) {
+    var d = p.d, ls = r.armacao || [];
+    var ws = [36, 22, 17, 17, 24, 22, 56], RH = 6.4;
+    var top = function (cont) {
+      p.y = simpleHeader(p, 'MONTAGEM DE ARMAÇÃO' + (cont ? ' (continuação)' : ''), 'DATA:  ' + br(r.date), logo);
+      p.cols([{ t: 'SUPERVISOR', bold: true, align: 'left' }, { t: r.supervisor || '', align: 'left' }, { t: 'Nº RDA', bold: true }, r.numero || ''], [36, 92, 22, 44], p.y, 6, { size: 7.5 }); p.y += 6;
+      p.cols([{ t: 'ENCARREGADO', bold: true, align: 'left' }, { t: r.enc || '', align: 'left' }], [36, 158], p.y, 6, { size: 7.5 }); p.y += 6;
+      p.y += 2;
+      p.cols(['ÁREA/LOCAL DA MONTAGEM', 'POSIÇÃO', 'QUANT/PÇ', 'BITOLA Ømm', 'COMPRIMENTO EM METROS (m)', 'PESO (kg)', 'Nº DO PROJETO E REVISÃO'], ws, p.y, 9, { bold: true, fill: GRAY, size: 6.3, wrap: true }); p.y += 9;
+    };
+    top(false);
+    var linha = function (x) {
+      var cells = x ? [x.area || '', x.posicao || '', x.qtd || '', x.bitola ? nfmt(x.bitola, 1) : '', x.comp ? nfmt(Number(String(x.comp).replace(',', '.')) / 100, 2) : '', nfmt(x.peso, 2), x.projeto || ''] : ['', '', '', '', '', '', ''];
+      var h = x ? Math.max(RH, Math.max(p.lines(cells[0], ws[0], 6.5), p.lines(cells[6], ws[6], 6.5)) * 3 + 1.5) : RH;
+      if (p.y + h > BOT - RH) { d.addPage(); top(true); }
+      p.cols(cells.map(function (c, i) { return { t: c, wrap: i === 0 || i === 6 }; }), ws, p.y, h, { size: 6.8 }); p.y += h;
+    };
+    ls.forEach(linha);
+    var tot = ls.reduce(function (t, x) { return t + (Number(String(x.peso || '').replace(',', '.')) || 0); }, 0);
+    while (p.y + RH * 2 <= BOT - RH && ls.length < 999) { linha(null); if (p.y + RH * 2 > BOT - RH) break; }
+    p.cols([{ t: 'TOTAL', bold: true, align: 'right' }, { t: nfmt(tot, 2), bold: true }, ''], [ws[0] + ws[1] + ws[2] + ws[3] + ws[4], ws[5], ws[6]], p.y, RH, { size: 7.5, fill: LGRAY }); p.y += RH;
+  }
+  window.temArmacao = function (r) { return !!(r && r.armacao && r.armacao.length); };
+  /** Relatório de armação separado (um por RDA) */
+  window.buildArmacaoPdf = function (r, opts, doc) {
+    opts = opts || {};
+    var start = newDocPage(doc), p = new Pdf(doc);
+    armPages(p, r, opts.logo);
+    pageFooter(doc, start, 'Montagem de armação  ·  ' + (r.numero || '') + '  ·  ' + br(r.date));
+    return doc;
+  };
+
   /** Permissão para horas extras (modelo da obra), um pedido por página */
   window.buildPermissaoPdf = function (h, opts, doc) {
     opts = opts || {};
@@ -321,6 +356,7 @@
     if (muro) muroAtivTable(p, r, ctx); else ativTable(p, r, ctx);
     paralTable(p, r, ctx, muro, muro ? 6 : 2);
     signBlock(p, r, opts.assinatura, ctx);
+    if (r.armacao && r.armacao.length) { doc.addPage(); p.y = M; armPages(p, r, opts.logo); }
     photoPages(p, r, opts.fotos, ctx);
     // rodapé apenas nas páginas deste RDA
     var end = doc.getNumberOfPages();

@@ -193,6 +193,7 @@
       r.atividades.forEach(function (a) { a.fotos = (a.fotos || []).map(function (id) { var p = m[id] || {}; return { id: id, fileId: p.fileId, fileName: p.fileName, takenAt: p.takenAt }; }); });
       r.assinaturaFileId = d.assinatura && m[d.assinatura] ? m[d.assinatura].fileId : '';
       r.assinaturaId = r.assinaturaFileId;
+      if (r.armacao) r.armacao = armLinhas(r).map(function (x) { return { area: x.area || '', posicao: x.posicao || '', qtd: x.qtd || '', bitola: x.bitola || '', comp: x.comp || '', peso: x.peso === '' || x.peso == null ? '' : numBr(x.peso), pesoManual: !!x.pesoManual, projetos: x.projetos || [], projeto: (x.projetos || []).map(projRev).join(' / ') }; });
       delete r.assinatura;
       return r;
     });
@@ -214,6 +215,7 @@
     if (!S.me) return renderPick();
     if (S.view === 'he') return renderHe();
     if (S.view === 'heform') return renderHeForm();
+    if (S.view === 'arm' && S.draft && S.me.armacao) return renderArm();
     return renderRda();
   }
   window.addEventListener('hashchange', render);
@@ -324,6 +326,7 @@
       '<div class="daybar"><button id="dprev">‹</button><div class="d">' + br(d.date) + '<small>' + DIAS[w] + (feriado ? ' · FERIADO' : '') + (d.date === today() ? ' · hoje' : '') + ' · ' + esc(d.periodo) + '</small></div><button id="dnext"' + (d.date >= today() ? ' disabled style="opacity:.3"' : '') + '>›</button></div></div>';
 
     html += '<button id="gohe" class="hebig"><span class="ic">⏱</span><span class="tx"><b>HORA EXTRA</b><small id="hestatus">Pedir extensão de horário ou escala</small></span><span class="go">›</span></button>';
+    if (S.me.armacao) html += '<button id="goarm" class="hebig armbig"><span class="ic">🔩</span><span class="tx"><b>MONTAGEM DE ARMAÇÃO</b><small>' + armResumo(d) + '</small></span><span class="go">›</span></button>';
     html += '<div id="pendbox"></div>';
     var fh = folgaHoje(S.me.nome, d.date);
     if (S.cover) html += '<div class="alert" style="background:#e3f2fd;border-color:#90caf9">🏖 Você está fazendo o RDA da equipe de <b>' + esc(S.me.nome) + '</b> (folga de campo). <button class="btn sm" id="covervolta" style="margin-top:8px">‹ Voltar para o meu RDA</button></div>';
@@ -512,24 +515,24 @@
       });
       if (all.length > max) h += '<p class="small muted" style="padding:8px">Mostrando ' + max + ' de ' + all.length + '. Digite mais para filtrar.</p>';
       var livre = st.q.trim();
-      if (livre && (kind !== 'projetos') && !all.some(function (o) { return norm(o.v) === norm(livre); })) h += '<button data-livre="1"><b>Usar "' + esc(livre) + '"</b><small>Não está na lista</small></button>';
+      if (livre && (kind !== 'projetos' || a.arm) && !all.some(function (o) { return norm(o.v) === norm(livre); })) h += '<button data-livre="1"><b>Usar "' + esc(livre) + '"</b><small>Não está na lista</small></button>';
       if (!all.length && !livre) h += '<p class="empty">' + (refsOk() ? 'Nada encontrado com esses filtros.' : 'A lista ainda não foi baixada. Conecte à internet uma vez para receber.') + '</p>';
       var L = b.querySelector('#rlist'); L.innerHTML = h;
       [].forEach.call(L.querySelectorAll('[data-i]'), function (x) {
         x.onclick = function () {
           var o = all[+x.dataset.i];
-          if (kind === 'area') { a.area = o.v; a.areaCod = o.cod || ''; save(); closeSheet(); renderRda(); return; }
+          if (kind === 'area') { a.area = o.v; a.areaCod = o.cod || ''; save(); closeSheet(); render(); return; }
           var k = sel.indexOf(o.v); if (k >= 0) sel.splice(k, 1); else sel.push(o.v); save(); draw();
         };
       });
       var lv = L.querySelector('[data-livre]');
       if (lv) lv.onclick = function () {
-        if (kind === 'area') { a.area = livre; a.areaCod = ''; save(); closeSheet(); renderRda(); return; }
+        if (kind === 'area') { a.area = livre; a.areaCod = ''; save(); closeSheet(); render(); return; }
         if (sel.indexOf(livre) < 0) sel.push(livre.toUpperCase()); save(); draw();
       };
     }
     var qi = b.querySelector('#rq'); qi.oninput = function () { st.q = qi.value; draw(); };
-    b.querySelector('#rok').onclick = function () { closeSheet(); renderRda(); };
+    b.querySelector('#rok').onclick = function () { closeSheet(); render(); };
     draw(); setTimeout(function () { qi.focus(); }, 50);
   }
 
@@ -602,6 +605,7 @@
     document.getElementById('trocar').onclick = function () { save(true); S.me = null; S.draft = null; DB.del('kv', 'me'); render(); updateBell(); };
     document.getElementById('hist').onclick = showHist;
     document.getElementById('gohe').onclick = function () { save(true); S.view = 'he'; render(); window.scrollTo(0, 0); };
+    var ga = document.getElementById('goarm'); if (ga) ga.onclick = function () { save(true); S.view = 'arm'; render(); window.scrollTo(0, 0); };
     heResumo(); drawPendentes();
     [].forEach.call(document.querySelectorAll('[data-cover]'), function (bt) {
       bt.onclick = function () {
@@ -902,7 +906,64 @@
   }
 
   /* ---------- envio ---------- */
-  function trySend() {
+  /* ---------- relatório de montagem de armação ---------- */
+  // kg/m das barras de aço (NBR 7480)
+  var BITOLAS = [['4.2', 0.109], ['5.0', 0.154], ['6.3', 0.245], ['8.0', 0.395], ['10.0', 0.617], ['12.5', 0.963], ['16.0', 1.578], ['20.0', 2.466], ['22.0', 2.984], ['25.0', 3.853], ['32.0', 6.313], ['40.0', 9.865]];
+  function numBr(v) { var n = Number(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.')); return isNaN(n) ? 0 : n; }
+  function kgm(b) { var x = BITOLAS.filter(function (k) { return k[0] === String(b); })[0]; return x ? x[1] : 0; }
+  function pesoCalc(x) { var q = numBr(x.qtd), c = numBr(x.comp), k = kgm(x.bitola); return q && c && k ? Math.round(q * c / 100 * k * 100) / 100 : ''; }
+  function armLinhas(d) { return (d.armacao || []).filter(function (x) { return x.area || x.posicao || x.qtd || x.bitola || x.comp || x.peso || (x.projetos || []).length; }); }
+  function armTotal(d) { return armLinhas(d).reduce(function (t, x) { return t + numBr(x.peso); }, 0); }
+  function armResumo(d) { var n = armLinhas(d).length; return n ? n + ' linha(s) · ' + fmtN(armTotal(d)) + ' kg' : 'Lançar a montagem de armação do dia'; }
+  function projRev(v) { var r = ((S.refs && S.refs.proj) || []).filter(function (p) { return p[0] === v; })[0]; return r && r[2] !== '' && r[2] != null ? v + ' REV ' + r[2] : v; }
+  function renderArm() {
+    var d = S.draft; d.armacao = d.armacao || [];
+    if (!d.armacao.length) d.armacao.push({ uid: uid(), arm: true, area: '', areaCod: '', posicao: '', qtd: '', bitola: '', comp: '', peso: '', pesoManual: false, projetos: [], projeto: '' });
+    d.armacao.forEach(function (x) { x.projeto = (x.projetos || []).map(projRev).join(' / '); });
+    var h = '<div class="rdahead"><div class="num">MONTAGEM DE ARMAÇÃO</div><div class="who">' + esc(S.me.nome) + '</div><div class="meta">' + br(d.date) + ' · ' + esc(d.numero) + ' · Supervisor: ' + esc(d.supervisor) + '</div></div>' +
+      '<p class="small muted" style="margin:0 0 10px">Comprimento em <b>centímetros</b> (ex.: 230 = 2,30 m). O peso é calculado pela bitola; se precisar, corrija.</p>';
+    d.armacao.forEach(function (x, i) {
+      h += '<div class="ativ" data-x="' + x.uid + '"><div class="ah"><b>Linha ' + (i + 1) + '</b><span><button class="btn sm ghost" data-dup="' + x.uid + '">Duplicar</button> <button class="btn sm danger" data-delx="' + x.uid + '">Excluir</button></span></div>' +
+        '<label class="f" style="margin-top:0">Área / local da montagem</label><button class="pick" data-xpk="area" data-u="' + x.uid + '">' + (x.area ? esc(x.area) : '<span class="muted">Toque para escolher</span>') + '</button>' +
+        '<div class="grid2"><div><label class="f">Posição</label><input data-xf="posicao" value="' + esc(x.posicao) + '" placeholder="Ex.: N1" autocapitalize="characters"></div>' +
+        '<div><label class="f">Quant/pç</label><input data-xf="qtd" inputmode="numeric" value="' + esc(x.qtd) + '"></div>' +
+        '<div><label class="f">Bitola Ø (mm)</label><select data-xf="bitola"><option value="">–</option>' + BITOLAS.map(function (b) { return '<option value="' + b[0] + '"' + (String(x.bitola) === b[0] ? ' selected' : '') + '>Ø ' + b[0].replace('.', ',') + '</option>'; }).join('') + '</select></div>' +
+        '<div><label class="f">Comprimento (cm)</label><input data-xf="comp" inputmode="decimal" value="' + esc(x.comp) + '" placeholder="Ex.: 230"></div></div>' +
+        '<label class="f">Peso (kg) <span class="muted small" data-pinfo>' + (x.pesoManual ? '· digitado' : '· calculado') + '</span></label><div style="display:flex;gap:8px"><input data-xf="peso" inputmode="decimal" value="' + esc(String(x.peso).replace('.', ',')) + '" style="flex:1"><button class="btn sm ghost" data-recalc="' + x.uid + '"' + (x.pesoManual ? '' : ' style="display:none"') + '>↺ Calcular</button></div>' +
+        '<label class="f">Nº do projeto e revisão</label><div class="rbox">' + (x.projetos || []).map(function (v) { return '<span class="rchip">' + esc(projRev(v)) + '<button data-xrm="' + x.uid + '" data-v="' + esc(v) + '">✕</button></span>'; }).join('') + '<button class="pick sm" data-xpk="projetos" data-u="' + x.uid + '">＋ Projeto</button></div></div>';
+    });
+    h += '<button class="btn ghost block" id="addx">＋ Adicionar linha</button>' +
+      '<div class="card" style="margin-top:12px"><b>Total: <span id="armtot">' + fmtN(armTotal(d)) + '</span> kg</b> · ' + armLinhas(d).length + ' linha(s)</div>' +
+      '<div class="bottombar"><button class="btn ghost" id="armvolta">‹ Voltar ao RDA</button></div>';
+    $app.innerHTML = h;
+    var achar = function (u) { return d.armacao.filter(function (x) { return x.uid === u; })[0]; };
+    document.getElementById('armvolta').onclick = function () { save(true); S.view = null; render(); window.scrollTo(0, 0); };
+    document.getElementById('addx').onclick = function () {
+      var ant = d.armacao[d.armacao.length - 1] || {};
+      d.armacao.push({ uid: uid(), arm: true, area: ant.area || '', areaCod: ant.areaCod || '', posicao: '', qtd: '', bitola: '', comp: '', peso: '', pesoManual: false, projetos: (ant.projetos || []).slice(), projeto: '' });
+      save(); renderArm(); var l = document.querySelectorAll('[data-x]'); l[l.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+    [].forEach.call(document.querySelectorAll('[data-dup]'), function (b) { b.onclick = function () { var x = achar(b.dataset.dup), c = JSON.parse(JSON.stringify(x)); c.uid = uid(); d.armacao.splice(d.armacao.indexOf(x) + 1, 0, c); save(); renderArm(); }; });
+    [].forEach.call(document.querySelectorAll('[data-delx]'), function (b) { b.onclick = function () { if (!confirm('Excluir esta linha?')) return; var x = achar(b.dataset.delx); d.armacao.splice(d.armacao.indexOf(x), 1); save(); renderArm(); }; });
+    [].forEach.call(document.querySelectorAll('[data-xpk]'), function (b) { b.onclick = function () { var x = achar(b.dataset.u); x.arm = true; pickRef(b.dataset.xpk, x); }; });
+    [].forEach.call(document.querySelectorAll('[data-xrm]'), function (b) { b.onclick = function () { var x = achar(b.dataset.xrm); x.projetos = (x.projetos || []).filter(function (v) { return v !== b.dataset.v; }); save(); renderArm(); }; });
+    [].forEach.call(document.querySelectorAll('[data-recalc]'), function (b) { b.onclick = function () { var x = achar(b.dataset.recalc); x.pesoManual = false; x.peso = pesoCalc(x); save(); renderArm(); }; });
+    [].forEach.call(document.querySelectorAll('[data-xf]'), function (inp) {
+      var box = inp.closest('[data-x]'), x = achar(box.dataset.x);
+      var ev = inp.tagName === 'SELECT' ? 'onchange' : 'oninput';
+      inp[ev] = function () {
+        var f = inp.dataset.xf, v = inp.value;
+        if (f === 'posicao') v = v.toUpperCase();
+        if (f === 'peso') { x.peso = v.replace(',', '.'); x.pesoManual = v.trim() !== ''; box.querySelector('[data-pinfo]').textContent = x.pesoManual ? '· digitado' : '· calculado'; box.querySelector('[data-recalc]').style.display = x.pesoManual ? '' : 'none'; }
+        else { x[f] = v; if (!x.pesoManual) { x.peso = pesoCalc(x); box.querySelector('[data-xf="peso"]').value = String(x.peso).replace('.', ','); } }
+        document.getElementById('armtot').textContent = fmtN(armTotal(d));
+        save();
+      };
+    });
+  }
+
+  function trySend(semArm) {
+    if (semArm !== true) semArm = false;
     var d = S.draft, falta = [];
     if (!d.clima.dia && !d.clima.tarde) falta.push('Condições do tempo');
     if (!d.atividades.length && !d.paralisacoes.length) falta.push('Pelo menos uma atividade ou paralisação');
@@ -911,6 +972,12 @@
     if ((d.outroOn || d.preenchidoPor) && !String(d.preenchidoPor || '').trim()) falta.push('Nome de quem está preenchendo');
     if (!d.assinatura) falta.push('Assinatura');
     if (falta.length) { sheet('<h3>Falta preencher</h3><div class="alert">' + falta.map(function (f) { return '• ' + esc(f); }).join('<br>') + '</div><button class="btn block" id="okf">Voltar e completar</button>').querySelector('#okf').onclick = closeSheet; return; }
+    if (S.me.armacao && !semArm && !armLinhas(d).length) {
+      var sb = sheet('<h3>🔩 Montagem de armação</h3><div class="alert">Você não lançou a <b>montagem de armação</b> de hoje.</div><button class="btn block orange" id="armlan">Lançar agora</button><button class="btn block ghost" id="armsem" style="margin-top:8px">Não teve montagem – enviar o RDA</button>');
+      sb.querySelector('#armlan').onclick = function () { closeSheet(); S.view = 'arm'; render(); window.scrollTo(0, 0); };
+      sb.querySelector('#armsem').onclick = function () { closeSheet(); trySend(true); };
+      return;
+    }
     d.state = 'fila'; save(true).then(function () {
       return DB.all('queue').then(function (q) {
         var exists = q.some(function (it) { return it.value.type === 'rda' && it.value.draftId === d.id; });
