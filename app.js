@@ -71,8 +71,43 @@
       if (b.refs && !b.refs.same) { S.refs = b.refs; DB.put('kv', 'refs', b.refs); }
       delete b.refs;
       S.boot = b; S.online = true;
-      return DB.put('kv', 'boot', b).then(function () { return applyLocalTeamOps(); }).then(function () { return true; });
+      return DB.put('kv', 'boot', b).then(function () { return migraRenomes(b.renomes); }).then(function () { return applyLocalTeamOps(); }).then(function () { return true; });
     }).catch(function (e) { if (e.auth) { S.key = ''; DB.del('kv', 'key'); render(); } return false; });
+  }
+  // encarregado que teve o nome trocado na administração: leva rascunhos, fila e login para o nome novo
+  function migraRenomes(m) {
+    if (!m || !Object.keys(m).length) return Promise.resolve();
+    var res = function (n) { var k = 0; while (n && m[n] && k++ < 10) n = m[n]; return n; };
+    var info = function (n) { return (S.boot.encarregados || []).filter(function (e) { return e.nome === n; })[0]; };
+    var idMap = {};
+    return DB.all('drafts').then(function (all) {
+      return Promise.all(all.map(function (x) {
+        var d = x.value; if (!d || !d.enc) return null;
+        var nn = res(d.enc); if (nn === d.enc) return null;
+        var e = info(nn), nd = Object.assign({}, d, { enc: nn, id: nn + '|' + d.date });
+        if (e) { nd.curto = e.curto; nd.cod = e.cod; nd.disciplina = e.disciplina; nd.supervisor = e.supervisor; }
+        idMap[x.key] = nd.id;
+        return DB.get('drafts', nd.id).then(function (ex) {
+          return (ex && (ex.updatedAt || 0) >= (d.updatedAt || 0) ? Promise.resolve() : DB.put('drafts', nd.id, nd)).then(function () { return DB.del('drafts', x.key); });
+        });
+      }));
+    }).then(function () { return DB.all('queue'); }).then(function (q) {
+      return Promise.all(q.map(function (it) {
+        var op = it.value, ch = false;
+        if (op.draftId && idMap[op.draftId]) { op.draftId = idMap[op.draftId]; ch = true; }
+        if (op.enc && res(op.enc) !== op.enc) { op.enc = res(op.enc); ch = true; }
+        return ch ? DB.put('queue', it.key, op) : null;
+      }));
+    }).then(function () { return DB.get('kv', 'me'); }).then(function (me) {
+      if (!me || res(me) === me) return;
+      var nn = res(me);
+      if (S.me && S.me.nome === me) S.me = info(nn) || Object.assign({}, S.me, { nome: nn });
+      if (S.draft && idMap[S.draft.id]) S.draft = null;
+      setTimeout(function () { if (location.hash !== '#admin') render(); }, 0);
+      return Promise.all([DB.put('kv', 'me', nn),
+        DB.get('kv', 'he:' + me).then(function (l) { if (!l) return; l.forEach(function (h) { h.enc = nn; }); return DB.put('kv', 'he:' + nn, l).then(function () { return DB.del('kv', 'he:' + me); }); }),
+        DB.get('kv', 'inbox:' + me).then(function (l) { if (l) return DB.put('kv', 'inbox:' + nn, l); })]);
+    });
   }
   // mantém alterações de equipe ainda não enviadas por cima do que veio do servidor
   function applyLocalTeamOps() {

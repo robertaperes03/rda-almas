@@ -70,13 +70,13 @@
     document.getElementById('topsub').textContent = 'Administração';
     if (!A.pass) return login();
     A.date = A.date || today(); A.de = A.de || today(); A.ate = A.ate || today();
-    $root.innerHTML = '<div class="tabs"><button data-t="entregas">📊 Recebimento</button><button data-t="exportar">📄 RDAs e exportação</button><button data-t="importar">⬆️ Importar</button><button data-t="he">⏱ Horas extras</button><button data-t="avisos">🔔 Avisos</button><button data-t="msg">✉️ Mensagens</button><button data-t="folgas">🏖 Folgas</button><button data-t="feriados">📅 Feriados</button><button data-t="ajuda">❓</button><button data-t="sair">Sair</button></div><div id="adm"></div>';
+    $root.innerHTML = '<div class="tabs"><button data-t="entregas">📊 Recebimento</button><button data-t="exportar">📄 RDAs e exportação</button><button data-t="importar">⬆️ Importar</button><button data-t="he">⏱ Horas extras</button><button data-t="avisos">🔔 Avisos</button><button data-t="msg">✉️ Mensagens</button><button data-t="folgas">🏖 Folgas</button><button data-t="feriados">📅 Feriados</button><button data-t="cadastro">🗂 Cadastro base</button><button data-t="ajuda">❓</button><button data-t="sair">Sair</button></div><div id="adm"></div>';
     [].forEach.call($root.querySelectorAll('.tabs button'), function (b) {
       b.classList.toggle('sel', b.dataset.t === A.tab);
       b.onclick = function () { if (b.dataset.t === 'sair') { A.pass = ''; sessionStorage.removeItem('rda_admin'); location.hash = ''; return; } A.tab = b.dataset.t; render(); };
     });
     if (A.tab === 'ajuda') { A.tab = 'entregas'; tourAdmin(true); }
-    if (A.tab === 'entregas') entregas(); else if (A.tab === 'exportar') exportar(); else if (A.tab === 'feriados') feriados(); else if (A.tab === 'he') horasExtras(); else if (A.tab === 'avisos') avisos(); else if (A.tab === 'msg') mensagens(); else if (A.tab === 'folgas') folgas(); else importar();
+    if (A.tab === 'entregas') entregas(); else if (A.tab === 'exportar') exportar(); else if (A.tab === 'feriados') feriados(); else if (A.tab === 'he') horasExtras(); else if (A.tab === 'avisos') avisos(); else if (A.tab === 'msg') mensagens(); else if (A.tab === 'folgas') folgas(); else if (A.tab === 'cadastro') cadastro(); else importar();
   }
 
   function login() {
@@ -460,6 +460,124 @@
     }).catch(function (e) { document.getElementById('helst').innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
   }
 
+
+  /* ---------- cadastro base ---------- */
+  var CADS = [['enc', '👷 Encarregados'], ['area', '📍 Áreas']];
+  function cadastro() {
+    var el = document.getElementById('adm');
+    A.cad = A.cad || 'enc';
+    el.innerHTML = '<div class="chips" style="margin:0 0 10px">' + CADS.map(function (c) { return '<button data-cad="' + c[0] + '" class="' + (A.cad === c[0] ? 'sel' : '') + '">' + c[1] + '</button>'; }).join('') + '</div><div id="cadbox"><p class="empty">Carregando…</p></div>';
+    [].forEach.call(el.querySelectorAll('[data-cad]'), function (b) { b.onclick = function () { A.cad = b.dataset.cad; cadastro(); }; });
+    if (A.cad === 'area') cadAreas(); else cadEnc();
+  }
+  function cadErro(e) { var b = document.getElementById('cadbox'); if (b) b.innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; }
+
+  /* ----- encarregados ----- */
+  function cadEnc(j) {
+    var box = document.getElementById('cadbox');
+    if (!j) return api('admin_encList').then(function (r) { A.encCad = r; cadEnc(r); }).catch(cadErro);
+    var f = A.encBusca || '';
+    var ok = function (e) { return !f || U().norm(e.nome + ' ' + e.curto + ' ' + e.disciplina + ' ' + e.supervisor).indexOf(U().norm(f)) >= 0; };
+    var ativos = j.encarregados.filter(function (e) { return e.ativo && ok(e); }), inat = j.encarregados.filter(function (e) { return !e.ativo && ok(e); });
+    var linha = function (e) {
+      return '<div class="rdaline" data-ed="' + esc(e.nome) + '" style="cursor:pointer"><div class="tx"><b>' + esc(e.nome) + '</b><small>' + esc(e.curto) + ' · ' + esc(e.disciplina) + (e.supervisor ? ' · sup. ' + esc(e.supervisor) : '') + ' · ' + e.equipe + ' na equipe</small></div>' +
+        (e.modelo === 'MURO' ? '<span class="tag">Muro</span>' : '') + (e.ativo ? (e.cobra ? '<span class="tag" style="background:#e6f4ea;color:#1e8e3e">Cobra RDA</span>' : '<span class="tag">Não cobra</span>') : '') + '<span class="muted">›</span></div>';
+    };
+    var grupos = {}; ativos.forEach(function (e) { (grupos[e.disciplina] = grupos[e.disciplina] || []).push(e); });
+    var h = '<div class="card"><div class="row" style="align-items:center"><input id="ebusca" placeholder="🔍 Procurar" value="' + esc(f) + '"><button class="btn" id="enovo" style="flex:0 0 auto">＋ Novo</button></div>' +
+      '<p class="small muted" style="margin-bottom:0">' + ativos.length + ' na lista do app. Toque num nome para editar, desativar ou mudar o modelo de RDA.</p></div>';
+    Object.keys(grupos).sort().forEach(function (d) {
+      h += '<div class="card"><div class="card-h"><h2>' + esc(d) + ' <span class="muted small">(' + grupos[d].length + ')</span></h2></div>' + grupos[d].sort(function (a, b) { return a.nome.localeCompare(b.nome); }).map(linha).join('') + '</div>';
+    });
+    if (!ativos.length) h += '<p class="empty">Ninguém encontrado</p>';
+    if (inat.length) h += '<div class="card"><div class="card-h"><h2>Inativos <span class="muted small">(fora da lista, histórico guardado)</span></h2></div>' + inat.map(linha).join('') + '</div>';
+    box.innerHTML = h;
+    var eb = document.getElementById('ebusca');
+    eb.oninput = function () { A.encBusca = eb.value; var pos = eb.selectionStart; cadEnc(j); var n = document.getElementById('ebusca'); n.focus(); n.setSelectionRange(pos, pos); };
+    document.getElementById('enovo').onclick = function () { encForm(null, j); };
+    [].forEach.call(box.querySelectorAll('[data-ed]'), function (r) { r.onclick = function () { encForm(j.encarregados.filter(function (e) { return e.nome === r.dataset.ed; })[0], j); }; });
+  }
+
+  function encForm(e, j) {
+    var novo = !e; e = e || { nome: '', curto: '', disciplina: '', supervisor: '', modelo: 'PADRAO', ativo: true, cobra: true, equipe: 0 };
+    var b = sheetUI('<h3>' + (novo ? 'Novo encarregado' : 'Editar encarregado') + '</h3>' +
+      '<label class="f" style="margin-top:0">Nome completo</label><input id="cn" value="' + esc(e.nome) + '" autocapitalize="characters">' +
+      '<label class="f">Nome curto</label><input id="cc" value="' + esc(e.curto) + '" autocapitalize="characters" placeholder="Ex.: ' + esc((e.nome || 'MARCIO JOEL').split(' ').slice(0, 2).join(' ')) + '"><p class="small muted" style="margin:4px 0 0">Vai no número do RDA: RDA-' + esc(e.cod || 'CIV') + '-<b>NOME CURTO</b>-0001' + (novo ? '' : '. Mudar o nome curto muda o número dos próximos RDAs.') + '</p>' +
+      '<label class="f">Disciplina</label><input id="cd" list="cdl" value="' + esc(e.disciplina) + '" autocapitalize="characters" placeholder="Escolha ou digite"><datalist id="cdl">' + j.disciplinas.map(function (d) { return '<option value="' + esc(d) + '">'; }).join('') + '</datalist>' +
+      '<label class="f">Supervisor</label><input id="cs" list="csl" value="' + esc(e.supervisor) + '" autocapitalize="characters" placeholder="Escolha ou digite"><datalist id="csl">' + j.supervisores.map(function (d) { return '<option value="' + esc(d) + '">'; }).join('') + '</datalist>' +
+      '<label class="f">Modelo de RDA</label><select id="cm"><option value="PADRAO"' + (e.modelo !== 'MURO' ? ' selected' : '') + '>Padrão</option><option value="MURO"' + (e.modelo === 'MURO' ? ' selected' : '') + '>Muro (fiadas)</option></select>' +
+      '<label class="person" style="cursor:pointer;margin-top:10px"><input type="checkbox" id="cb"' + (e.cobra ? ' checked' : '') + ' style="width:28px;height:28px;min-height:0;flex:0 0 28px"><div class="pinfo"><b>Cobrar RDA</b><small>Entra no controle de recebimento e recebe os alertas de prazo</small></div></label>' +
+      '<div class="row" style="margin-top:14px">' + (novo ? '' : '<button class="btn ' + (e.ativo ? 'danger' : 'ghost') + '" id="cat">' + (e.ativo ? 'Desativar' : 'Reativar') + '</button>') + '<button class="btn" id="cok">' + (novo ? 'Cadastrar' : 'Salvar') + '</button></div>');
+    var val = function () {
+      return { nome: b.querySelector('#cn').value, curto: b.querySelector('#cc').value, disciplina: b.querySelector('#cd').value, supervisor: b.querySelector('#cs').value, modelo: b.querySelector('#cm').value, cobra: b.querySelector('#cb').checked, ativo: e.ativo };
+    };
+    var enviar = function (v, hist) {
+      busy('Salvando…');
+      api('admin_encSave', { orig: novo ? '' : e.nome, e: v, historico: !!hist }, 120000).then(function (r) {
+        A.encCad = r; closeUI();
+        done(novo ? 'Encarregado cadastrado ✓' : (v.ativo === false && e.ativo ? 'Desativado ✓ (histórico guardado)' : (!e.ativo && v.ativo ? 'Reativado ✓' : 'Salvo ✓')));
+        cadEnc(r);
+      }).catch(function (x) { done('Erro: ' + x.message); });
+    };
+    var salvar = function (v) {
+      var nn = String(v.nome || '').replace(/\s+/g, ' ').trim().toUpperCase();
+      if (!nn) return done('Informe o nome');
+      if (!String(v.disciplina || '').trim()) return done('Informe a disciplina');
+      if (novo || nn === e.nome) return enviar(v, false);
+      var s2 = sheetUI('<h3>Trocar o nome</h3><p>De <b>' + esc(e.nome) + '</b><br>para <b>' + esc(nn) + '</b></p>' +
+        '<p class="small muted">A equipe, a programação, as folgas e o celular dele passam para o nome novo de qualquer forma. O RDA ainda não enviado no celular também vai com o nome novo.</p>' +
+        '<p><b>E nos RDAs, horas extras e controles já enviados?</b></p>' +
+        '<button class="btn block" id="h1">Trocar também nos já enviados</button><p class="small muted" style="margin:4px 0 12px">A planilha e os PDFs gerados daqui em diante saem com o nome novo.</p>' +
+        '<button class="btn ghost block" id="h0">Manter o nome antigo nos já enviados</button><p class="small muted" style="margin:4px 0 12px">Os já enviados continuam como estão. O controle de recebimento entende que é a mesma pessoa.</p>' +
+        '<button class="btn ghost block" id="hx">Cancelar</button>');
+      s2.querySelector('#h1').onclick = function () { enviar(v, true); };
+      s2.querySelector('#h0').onclick = function () { enviar(v, false); };
+      s2.querySelector('#hx').onclick = function () { encForm(e, j); };
+    };
+    b.querySelector('#cok').onclick = function () { salvar(val()); };
+    var at = b.querySelector('#cat');
+    if (at) at.onclick = function () {
+      var v = val();
+      if (e.ativo) {
+        if (!confirm(e.nome + ' sai da lista do app e do controle de recebimento.\n\nOs RDAs, horas extras e todo o histórico continuam guardados.' + (e.equipe ? '\n\nAtenção: ' + e.equipe + ' pessoa(s) ainda estão na equipe dele. Elas continuam vinculadas até alguém trazê-las para outra equipe.' : '') + '\n\nDesativar?')) return;
+        v.ativo = false; v.nome = e.nome; enviar(v, false);
+      } else { v.ativo = true; v.nome = e.nome; enviar(v, false); }
+    };
+  }
+
+  /* ----- áreas ----- */
+  function cadAreas(j) {
+    var box = document.getElementById('cadbox');
+    if (!j) return api('admin_areas').then(function (r) { cadAreas(r); }).catch(cadErro);
+    var f = A.areaBusca || '';
+    var lista = j.areas.filter(function (a) { return !f || U().norm(a.c + ' ' + a.n).indexOf(U().norm(f)) >= 0; });
+    box.innerHTML = '<div class="card"><div class="row" style="align-items:center"><input id="abusca" placeholder="🔍 Procurar" value="' + esc(f) + '"><button class="btn" id="anova" style="flex:0 0 auto">＋ Nova</button></div>' +
+      '<p class="small muted" style="margin-bottom:0">' + j.areas.length + ' áreas. É a lista que o encarregado vê ao escolher a área da atividade. Mudanças chegam no celular na próxima vez que ele abrir o app com internet.</p></div>' +
+      '<div class="card">' + (lista.map(function (a, i) {
+        return '<div class="rdaline" data-ai="' + j.areas.indexOf(a) + '" style="cursor:pointer"><div class="tx"><b>' + (a.c ? esc(a.c) + ' – ' : '') + esc(a.n) + '</b><small>' + (a.c ? '' : 'sem código · ') + (a.tags ? a.tags + ' TAG(s) desta área' : 'nenhuma TAG ligada') + '</small></div><span class="muted">›</span></div>';
+      }).join('') || '<p class="empty">Nenhuma área encontrada</p>') + '</div>';
+    var ab = document.getElementById('abusca');
+    ab.oninput = function () { A.areaBusca = ab.value; var pos = ab.selectionStart; cadAreas(j); var n = document.getElementById('abusca'); n.focus(); n.setSelectionRange(pos, pos); };
+    document.getElementById('anova').onclick = function () { areaForm(null, j); };
+    [].forEach.call(box.querySelectorAll('[data-ai]'), function (r) { r.onclick = function () { areaForm(j.areas[+r.dataset.ai], j); }; });
+  }
+  function areaForm(a, j) {
+    var nova = !a; a = a || { c: '', n: '' };
+    var b = sheetUI('<h3>' + (nova ? 'Nova área' : 'Editar área') + '</h3>' +
+      '<label class="f" style="margin-top:0">Código <span class="muted small">(opcional, ex.: 1050)</span></label><input id="ac" value="' + esc(a.c) + '" inputmode="numeric">' +
+      '<label class="f">Nome</label><input id="an" value="' + esc(a.n) + '" autocapitalize="characters" placeholder="Ex.: PENEIRAMENTO SECUNDÁRIO">' +
+      (nova ? '' : '<p class="small muted">RDAs já enviados continuam com a área escrita como estava.' + (a.tags ? ' Se mudar o código, as ' + a.tags + ' TAG(s) ligadas ao código ' + esc(a.c) + ' deixam de aparecer no filtro desta área.' : '') + '</p>') +
+      '<div class="row" style="margin-top:14px">' + (nova ? '' : '<button class="btn danger" id="arm">Excluir</button>') + '<button class="btn" id="aok">' + (nova ? 'Cadastrar' : 'Salvar') + '</button></div>');
+    var go = function (rm) {
+      busy('Salvando…');
+      api('admin_areaSave', { orig: nova ? null : a, area: { c: b.querySelector('#ac').value, n: b.querySelector('#an').value }, remove: !!rm }).then(function (r) {
+        closeUI(); done(rm ? 'Área excluída ✓' : 'Salvo ✓'); cadAreas(r);
+      }).catch(function (x) { done('Erro: ' + x.message); });
+    };
+    b.querySelector('#aok').onclick = function () { go(false); };
+    var rm = b.querySelector('#arm');
+    if (rm) rm.onclick = function () { if (confirm('Excluir a área ' + (a.c ? a.c + ' – ' : '') + a.n + '?\n\nEla some da lista do app. RDAs já enviados continuam com a área escrita.')) go(true); };
+  }
 
   /* ---------- quem faz RDA ---------- */
   function quemFaz() {
