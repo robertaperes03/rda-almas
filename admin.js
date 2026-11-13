@@ -240,10 +240,50 @@
       '<div class="card"><div class="card-h"><h2>Posição de frota (equipamentos)</h2></div><p class="small muted" style="margin-top:0">Escolha a planilha de posição de frota. A lista da aba CADASTRO vira a sugestão de equipamentos no RDA. Ficam de fora os que estão como DESM (desmobilizado) na aba POSIÇÃO DE FROTA - ANALÍTICA na última data marcada até hoje.</p>' +
       '<label class="btn block ghost">🚜 Escolher posição de frota…<input type="file" id="ffrota" accept=".xlsx" class="hidden"></label><div id="rfrota"></div></div>' +
       '<div class="card"><div class="card-h"><h2>Projetos (lista do Greendocs)</h2></div><p class="small muted" style="margin-top:0">Quando sair revisão nova, exporte do Greendocs e escolha aqui a planilha (colunas Nome, Título Complementar e Revisão). Pode escolher as duas listas juntas (Projetos e PIM/CODEME). A lista do app é substituída por estas.</p>' +
-      '<label class="btn block ghost">📐 Escolher lista(s) do Greendocs…<input type="file" id="fgd" accept=".xlsx" multiple class="hidden"></label><div id="rgd"></div></div>';
+      '<label class="btn block ghost">📐 Escolher lista(s) do Greendocs…<input type="file" id="fgd" accept=".xlsx" multiple class="hidden"></label><div id="rgd"></div></div>' +
+      '<div class="card"><div class="card-h"><h2>TAGs</h2></div><p class="small muted" style="margin-top:0">Escolha uma ou mais planilhas com as colunas <b>TAG</b>, DESCRIÇÃO, TIPO, DOCUMENTO, DISCIPLINA e ÁREA (só a TAG é obrigatória; a ordem das colunas não importa). Só entram as TAGs <b>novas</b>; as que já existem no app não são alteradas.</p>' +
+      '<label class="btn block ghost">🏷 Escolher planilha(s) de TAGs…<input type="file" id="ftag" accept=".xlsx" multiple class="hidden"></label><div id="rtag"></div></div>';
     document.getElementById('fprog').onchange = function () { var f = this.files[0]; if (f) importProg(f); this.value = ''; };
     document.getElementById('ffrota').onchange = function () { var f = this.files[0]; if (f) importFrota(f); this.value = ''; };
     document.getElementById('fgd').onchange = function () { var f = [].slice.call(this.files); if (f.length) importGreendocs(f); this.value = ''; };
+    document.getElementById('ftag').onchange = function () { var f = [].slice.call(this.files); if (f.length) importTags(f); this.value = ''; };
+  }
+  function importTags(files) {
+    var out = document.getElementById('rtag'); out.innerHTML = '<p class="empty">Lendo arquivo(s)…</p>';
+    var itens = [], semTag = [];
+    var acha = function (hdr, nomes) { for (var i = 0; i < hdr.length; i++) for (var j = 0; j < nomes.length; j++) if (hdr[i] === nomes[j] || hdr[i].indexOf(nomes[j] + ' ') === 0 || hdr[i].indexOf(nomes[j] + '(') === 0) return i; return -1; };
+    libsXlsx().then(function () {
+      return files.reduce(function (c, file) {
+        return c.then(function () {
+          return window.readXlsx(file).then(function (book) {
+            var achou = false;
+            Object.keys(book).forEach(function (name) {
+              var rows = book[name];
+              for (var i = 0; i < Math.min(rows.length, 20); i++) {
+                var hdr = (rows[i] || []).map(H), cT = acha(hdr, ['TAG', 'MARCA']);
+                if (cT < 0) continue;
+                var cD = acha(hdr, ['DESCRICAO', 'DESCRIÇÃO', 'PECA']), cTi = acha(hdr, ['TIPO']), cDo = acha(hdr, ['DOCUMENTO', 'DOCUMENTO ORIGEM', 'DOC', 'DIAGRAMA DE MONTAGEM', 'PROJETO']), cDi = acha(hdr, ['DISCIPLINA', 'DISC']), cA = acha(hdr, ['AREA']);
+                var v = function (row, c) { return c < 0 || row[c] == null ? '' : String(row[c]).replace(/\s+/g, ' ').trim(); };
+                for (var r = i + 1; r < rows.length; r++) {
+                  var row = rows[r] || [], tag = v(row, cT);
+                  if (!tag) continue;
+                  itens.push([tag, v(row, cD), v(row, cTi), v(row, cDo), v(row, cDi), v(row, cA)]);
+                }
+                achou = true; break;
+              }
+            });
+            if (!achou) semTag.push(file.name);
+          });
+        });
+      }, Promise.resolve());
+    }).then(function () {
+      if (!itens.length) throw new Error(semTag.length ? 'Não achei a coluna TAG em: ' + semTag.join(', ') : 'Nenhuma TAG encontrada.');
+      out.innerHTML = '<p class="empty">Enviando ' + itens.length + ' linhas…</p>';
+      return api('admin_addTags', { itens: itens }, 120000).then(function (r) {
+        out.innerHTML = '<div class="alert ok">✓ <b>' + r.novas + ' TAG(s) nova(s)</b> incluída(s). ' + (r.existentes ? r.existentes + ' já existiam e não foram alteradas. ' : '') + (r.repetidas ? r.repetidas + ' repetida(s) na planilha. ' : '') + 'Total no app: ' + r.total + '. Os celulares recebem na próxima sincronização.</div>' +
+          (semTag.length ? '<div class="alert">Arquivo(s) sem coluna TAG (ignorados): ' + esc(semTag.join(', ')) + '</div>' : '');
+      });
+    }).catch(function (e) { out.innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
   }
   function importGreendocs(files) {
     var out = document.getElementById('rgd'); out.innerHTML = '<p class="empty">Lendo arquivo(s)…</p>';

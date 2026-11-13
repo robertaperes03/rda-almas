@@ -141,7 +141,7 @@
     while (rows.length < 10) rows.push({});
     rows.forEach(function (a) {
       item++;
-      var desc = (a.desc || '') + ((a.fotos || []).length ? ' (' + a.fotos.length + ' foto' + (a.fotos.length > 1 ? 's' : '') + ')' : '');
+      var desc = (a.desc || '') + (!a.tipo && a.area ? '  | Área: ' + a.area : '') + ((a.fotos || []).length ? ' (' + a.fotos.length + ' foto' + (a.fotos.length > 1 ? 's' : '') + ')' : '');
       var h = Math.max(rh, p.lines(desc, widths[1], 6.3) * 2.9 + 1.6);
       ensure(p, h, r, ctx.logo, ctx.titulo);
       p.cols([item, { t: desc, align: 'left', wrap: true, size: 6.3 }, a.fiada || '', a.qtd || '', brs(a.dataIni), a.horaIni || ':', brs(a.dataFim), a.horaFim || ':'], widths, p.y, h, { size: 7, color: [10, 30, 120] });

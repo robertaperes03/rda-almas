@@ -550,7 +550,8 @@
   function muroLinha(a) {
     return '<div data-a="' + a.uid + '" style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px">' +
       (a.progId ? '<div class="prog">📋 Da programação da semana</div>' : '') +
-      (!a.tipo ? '<textarea data-f="desc" placeholder="Descrição da atividade">' + esc(a.desc) + '</textarea>' : '') +
+      (!a.tipo ? '<textarea data-f="desc" placeholder="Descrição da atividade">' + esc(a.desc) + '</textarea>' +
+        '<label class="f">Área</label><button class="pick" data-pk="area" data-u="' + a.uid + '">' + (a.area ? esc(a.area) : '<span class="muted">Toque para escolher a área</span>') + '</button>' : '') +
       '<div class="grid2"><div><label class="f">Nº da fiada' + (a.tipo ? ' <b style="color:var(--bad)">*</b>' : '') + '</label><input data-f="fiada" inputmode="numeric" value="' + esc(a.fiada) + '"></div><div><label class="f">Qtd montada</label><input data-f="qtd" value="' + esc(a.qtd) + '"></div>' +
       '<div><label class="f">Data início</label><input type="date" data-f="dataIni" value="' + esc(a.dataIni) + '"></div><div><label class="f">Hora início</label><input type="time" data-f="horaIni" value="' + esc(a.horaIni) + '"></div>' +
       '<div><label class="f">Data término</label><input type="date" data-f="dataFim" value="' + esc(a.dataFim) + '"></div><div><label class="f">Hora término</label><input type="time" data-f="horaFim" value="' + esc(a.horaFim) + '"></div></div>' +
