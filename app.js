@@ -203,9 +203,11 @@
   setInterval(function () { if (navigator.onLine) sync(); }, 90000);
   document.getElementById('syncpill').onclick = function () { if (navigator.onLine) { toast('Sincronizando…'); sync().then(function () { toast(S.pending ? 'Ainda há ' + S.pending + ' item(ns) na fila' : 'Tudo enviado ✓'); }); } else toast('Sem internet. Os dados ficam guardados no celular.'); };
 
+  var ADMIN_APP = /admin\.html$/.test(location.pathname);
   /* ---------------- telas ---------------- */
   function render() {
     closeSheet();
+    if (ADMIN_APP && location.hash !== '#admin') { location.replace('#admin'); return; }
     if (location.hash === '#admin') { if (window.RDA_ADMIN) return window.RDA_ADMIN.render($app); }
     if (!S.key) return renderKey();
     if (!S.boot) return renderLoading();

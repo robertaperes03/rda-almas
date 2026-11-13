@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b2a5b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="RDA Admin">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>RDA Admin</title>
+<link rel="manifest" href="manifest-admin.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Dancing+Script:wght@600&family=Great+Vibes&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand"><img src="icon-192.png" alt=""><div><b>RDA</b><small id="topsub">Almas · Britagem</small></div></div>
+  <div style="display:flex;align-items:center;gap:8px"><button id="bell" class="bell hidden" type="button" aria-label="Avisos">🔔<span id="bellcount" class="hidden">0</span></button><button id="syncpill" class="pill" type="button"><span class="dot"></span><span id="synctext">…</span></button></div>
+</header>
+<main id="app"></main>
+<div id="sheet" class="sheet hidden"><div class="sheet-bg"></div><div class="sheet-body" id="sheetbody"></div></div>
+<div id="toast" class="toast hidden"></div>
+<script>if (location.hash !== '#admin') history.replaceState(null, '', location.pathname + location.search + '#admin');</script>
+<script src="config.js"></script>
+<script src="db.js"></script>
+<script src="pdf.js"></script>
+<script src="admin.js"></script>
+<script src="app.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function(){}); });
+}
+</script>
+</body>
+</html>

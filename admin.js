@@ -601,7 +601,12 @@
     el.innerHTML = '<div class="card"><div class="card-h"><h2>Notificações neste aparelho</h2></div><p class="small muted" style="margin-top:0">Você recebe um resumo a cada hora com as novidades (RDAs enviados, alterados ou atrasados, pedidos de hora extra, mudanças de equipe). O mesmo resumo vai para o seu e-mail.</p>' +
       '<div class="row"><button class="btn orange" id="anot">🔔 ' + (perm === 'granted' ? 'Reativar notificações' : 'Ativar notificações') + '</button><button class="btn ghost" id="atest">Enviar teste</button></div>' +
       '<button class="btn ghost block" style="margin-top:8px" id="ainst">📲 Instalar como aplicativo</button></div><div class="card"><div class="card-h"><h2>Últimos avisos</h2></div><div id="alist"><p class="empty">Carregando…</p></div></div>';
-    document.getElementById('ainst').onclick = function () { window.RDA_INSTALL(); };
+    document.getElementById('ainst').onclick = function () {
+      if (!/admin\.html$/.test(location.pathname)) { location.href = 'admin.html#admin'; return; }
+      window.RDA_INSTALL();
+    };
+    if (!/admin\.html$/.test(location.pathname)) document.getElementById('ainst').textContent = '📲 Instalar o app da administração';
+    else document.getElementById('ainst').insertAdjacentHTML('afterend', '<p class="small muted" style="margin:6px 0 0">Instala o ícone <b>RDA Admin</b>, separado do app dos encarregados.</p>');
     document.getElementById('anot').onclick = function () {
       window.RDA_PUSH.setVapid(sessionStorage.getItem('rda_vapid'));
       window.RDA_PUSH.ativar(function (sub) { return api('admin_pushSubscribe', { sub: sub }).then(function (r) { return DB.put('kv', 'adminToken', r.token); }); });

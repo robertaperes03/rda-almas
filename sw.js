@@ -1,7 +1,7 @@
 // Guarda o aplicativo no celular para abrir sem internet.
-var CACHE = 'rda-almas-v6';
+var CACHE = 'rda-almas-v7';
 importScripts('config.js');
-var SHELL = ['./', 'index.html', 'style.css', 'config.js', 'db.js', 'app.js', 'admin.js', 'pdf.js', 'logo.jpg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'pdf-lib.min.js', 'pdfa.js', 'jszip.min.js', 'xlsxw.js', 'xlsxr.js'];
+var SHELL = ['./', 'index.html', 'style.css', 'config.js', 'db.js', 'app.js', 'admin.js', 'pdf.js', 'logo.jpg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'admin.html', 'manifest-admin.webmanifest', 'pdf-lib.min.js', 'pdfa.js', 'jszip.min.js', 'xlsxw.js', 'xlsxr.js'];
 var LAZY = ['pdf-lib.min.js', 'pdfa.js', 'jszip.min.js', 'xlsxw.js'];
 
 self.addEventListener('install', function (e) {
@@ -72,7 +72,7 @@ self.addEventListener('push', function (e) {
 });
 self.addEventListener('notificationclick', function (e) {
   e.notification.close();
-  var url = './' + (e.notification.data && e.notification.data.admin ? '#admin' : '');
+  var url = (e.notification.data && e.notification.data.admin ? './admin.html#admin' : './');
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (cs) {
     for (var i = 0; i < cs.length; i++) { if ('focus' in cs[i]) { cs[i].navigate && e.notification.data && e.notification.data.admin && cs[i].navigate(url); return cs[i].focus(); } }
     return self.clients.openWindow(url);
