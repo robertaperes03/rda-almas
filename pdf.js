@@ -120,10 +120,10 @@
     var n = Math.max(at.length, 4);
     for (var i = 0; i < n; i++) {
       var a = at[i] || {};
-      var desc = (a.desc || '') + (a.progId ? (a.concluida ? '  [Programação: concluída]' : '  [Programação: em andamento]') : '') + ((a.fotos || []).length ? '  (' + a.fotos.length + ' foto' + (a.fotos.length > 1 ? 's' : '') + ' – ver registro fotográfico)' : '');
-      var h = Math.max(11, p.lines(desc, widths[1], 8) * 3.6 + 3);
+      var desc = (a.desc || '') + ((a.projetos || []).length ? '  | Projeto: ' + a.projetos.join(', ') : '') + ((a.tags || []).length ? '  | TAG: ' + a.tags.join(', ') : '') + (a.progId ? (a.concluida ? '  [Programação: concluída]' : '  [Programação: em andamento]') : '') + ((a.fotos || []).length ? '  (' + a.fotos.length + ' foto' + (a.fotos.length > 1 ? 's' : '') + ' – ver registro fotográfico)' : '');
+      var h = Math.max(11, p.lines(desc, widths[1], 8) * 3.6 + 3, p.lines(a.area || '', widths[2], 7) * 3.2 + 3);
       ensure(p, h, r, ctx.logo, ctx.titulo);
-      p.cols([i + 1, { t: desc, align: 'left', wrap: true, size: 8, color: [10, 30, 120] }, { t: a.area || '', wrap: true }, a.qtd || ''], widths, p.y, h, { size: 7.5 });
+      p.cols([i + 1, { t: desc, align: 'left', wrap: true, size: 8, color: [10, 30, 120] }, { t: a.area || '', wrap: true, size: 7 }, a.qtd || ''], widths, p.y, h, { size: 7.5 });
       p.y += h;
     }
   }
@@ -170,7 +170,8 @@
     p.cols(['ENCARREGADO', 'SUPERVISOR', 'PLANEJAMENTO'], ws, p.y, 4.5, { bold: true, fill: GRAY }); p.y += 4.5;
     p.cols(['', '', ''], ws, p.y, h);
     if (sig) { try { p.d.addImage(sig, 'PNG', M + 4, p.y + 1, ws[0] - 8, h - 6); } catch (e) { } }
-    p.text(r.enc, M, p.y + h - 5, ws[0], 4, { size: 6.5 });
+    if (r.preenchidoPor) p.text('Preenchido por: ' + r.preenchidoPor + ' – encarregado de folga de campo', M, p.y + h - 7, ws[0], 7, { size: 5.6, wrap: true });
+    else p.text(r.enc, M, p.y + h - 5, ws[0], 4, { size: 6.5 });
     p.y += h;
   }
   function photoPages(p, r, fotos, ctx) {

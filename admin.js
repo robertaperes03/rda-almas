@@ -11,7 +11,6 @@
   function addDays(s, n) { var d = new Date(s + 'T12:00:00'); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); }
   function dow(s) { return new Date(s + 'T12:00:00').getDay(); }
   function diff(a, b) { return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000); }
-  function prevista(d) { var w = dow(d); return addDays(d, w === 5 ? 3 : w === 6 ? 2 : 1); }
   function esc(s) { return U().esc(s); }
   function br(s) { return U().br(s); }
   function api(action, data, t) { return window.RDA_API(action, Object.assign({ admin: A.pass }, data || {}), t); }
@@ -30,21 +29,29 @@
 
   /* ----- regra do controle de recebimento (igual à planilha de controle) ----- */
   function numero(e, d) { var n = e.refData && e.refNum ? e.refNum + diff(e.refData, d) : 0; return 'RDA-' + (e.cod || '') + '-' + (e.curto || e.nome) + '-' + (n > 0 ? ('000' + n).slice(-4) : '????'); }
+  function diaUtil(d, j) { var w = dow(d); return w >= 1 && w <= 5 && j.feriados.indexOf(d) < 0; }
+  function temAtiv(e, d, j) { return diaUtil(d, j) || (j.escalas || {})[e.nome + '|' + d] || j.map[e.nome + '|' + d]; }
+  function prazoDe(e, d, j) { for (var k = 1; k <= 12; k++) { var x = addDays(d, k); if (temAtiv(e, x, j)) return x + ' 12:00'; } return addDays(d, 1) + ' 12:00'; }
+  function atrasoDias(prazo, quando) { if (quando <= prazo) return 0; return Math.max(1, diff(prazo.slice(0, 10), quando.slice(0, 10))); }
   function controle(j, e, d) {
     var r = j.map[e.nome + '|' + d];
     var ov = j.situacoes[e.nome + '|' + d];
-    var sit = ov ? ov.s : (dow(d) === 0 ? 'DOMINGO / DSR' : (j.feriados.indexOf(d) >= 0 ? 'FERIADO' : 'TRABALHO NORMAL'));
+    var esc = (j.escalas || {})[e.nome + '|' + d];
+    var fo = (j.folgas || []).filter(function (f) { return f.enc === e.nome && d >= f.ini && d <= f.fim; })[0];
+    var sit = ov ? ov.s : (fo && !fo.subst ? 'FOLGA DE CAMPO' : diaUtil(d, j) || esc ? 'TRABALHO NORMAL' : dow(d) === 0 ? 'DOMINGO / DSR' : j.feriados.indexOf(d) >= 0 ? 'FERIADO' : 'SEM ESCALA');
     if (!e.cobra && !ov) sit = 'NÃO TEM RDA';
     var cobra = (j.listaSituacoes.filter(function (x) { return x[0] === sit; })[0] || [sit, true])[1];
-    var prev = prevista(d), out = { rda: r, sit: sit, obs: ov ? ov.o : '', cobra: cobra || !!r, prevista: prev, numero: r ? r.numero : numero(e, d) };
-    if (!r) { // o encarregado (e a equipe dele) consta no RDA de outro encarregado: conta como feito
+    var prazo = prazoDe(e, d, j), agora = j.agora || (today() + ' 23:59');
+    var out = { rda: r, sit: sit, obs: ov ? ov.o : (fo ? 'Folga de campo ' + br(fo.ini).slice(0, 5) + '–' + br(fo.fim).slice(0, 5) + (fo.subst ? ', RDA por ' + fo.subst : '') : ''), cobra: cobra || !!r, prevista: prazo.slice(0, 10), prazo: prazo, numero: r ? r.numero : numero(e, d) };
+    if (!r) { // o encarregado consta no RDA de outro encarregado: conta como feito
       var outro = j.rdas.filter(function (x) {
         return x.date === d && x.enc !== e.nome && (x.membros || []).some(function (m) { return (m[0] === e.nome || m[0].indexOf(e.nome + ' ') === 0) && (!m[1] || stOk(m[1])); });
       })[0];
-      if (outro) { out.via = outro; out.cobra = cobra; out.status = 'Concluído'; out.sit = sit; out.entrega = String(outro.enviadoEm).slice(0, 10); out.atraso = Math.max(0, diff(prev, out.entrega)); out.obs = 'Consta no RDA de ' + outro.enc + ' (' + outro.numero + ')'; return out; }
+      if (outro) { out.via = outro; out.cobra = cobra; out.status = 'Concluído'; out.entrega = String(outro.enviadoEm).slice(0, 10); out.atraso = atrasoDias(prazo, String(outro.enviadoEm).slice(0, 16)); out.obs = 'Consta no RDA de ' + outro.enc + ' (' + outro.numero + ')'; return out; }
     }
-    if (r) { out.status = 'Concluído'; out.entrega = String(r.enviadoEm).slice(0, 10); out.atraso = Math.max(0, diff(prev, out.entrega)); }
-    else if (cobra) { out.status = 'Pendente'; out.atraso = Math.max(0, diff(prev, today())); }
+    if (r) { out.status = 'Concluído'; out.entrega = String(r.enviadoEm).slice(0, 10); out.atraso = atrasoDias(prazo, String(r.enviadoEm).slice(0, 16)); }
+    else if (cobra && agora > prazo) { out.status = 'Pendente'; out.atraso = atrasoDias(prazo, agora); }
+    else if (cobra) { out.status = 'No prazo'; out.atraso = 0; }
     else { out.status = 'Desconsiderado'; out.atraso = 0; }
     return out;
   }
@@ -63,12 +70,13 @@
     document.getElementById('topsub').textContent = 'Administração';
     if (!A.pass) return login();
     A.date = A.date || today(); A.de = A.de || today(); A.ate = A.ate || today();
-    $root.innerHTML = '<div class="tabs"><button data-t="entregas">📊 Recebimento</button><button data-t="exportar">📄 RDAs e exportação</button><button data-t="importar">⬆️ Programação e frota</button><button data-t="he">⏱ Horas extras</button><button data-t="feriados">📅 Feriados</button><button data-t="sair">Sair</button></div><div id="adm"></div>';
+    $root.innerHTML = '<div class="tabs"><button data-t="entregas">📊 Recebimento</button><button data-t="exportar">📄 RDAs e exportação</button><button data-t="importar">⬆️ Importar</button><button data-t="he">⏱ Horas extras</button><button data-t="avisos">🔔 Avisos</button><button data-t="msg">✉️ Mensagens</button><button data-t="folgas">🏖 Folgas</button><button data-t="feriados">📅 Feriados</button><button data-t="ajuda">❓</button><button data-t="sair">Sair</button></div><div id="adm"></div>';
     [].forEach.call($root.querySelectorAll('.tabs button'), function (b) {
       b.classList.toggle('sel', b.dataset.t === A.tab);
       b.onclick = function () { if (b.dataset.t === 'sair') { A.pass = ''; sessionStorage.removeItem('rda_admin'); location.hash = ''; return; } A.tab = b.dataset.t; render(); };
     });
-    if (A.tab === 'entregas') entregas(); else if (A.tab === 'exportar') exportar(); else if (A.tab === 'feriados') feriados(); else if (A.tab === 'he') horasExtras(); else importar();
+    if (A.tab === 'ajuda') { A.tab = 'entregas'; tourAdmin(true); }
+    if (A.tab === 'entregas') entregas(); else if (A.tab === 'exportar') exportar(); else if (A.tab === 'feriados') feriados(); else if (A.tab === 'he') horasExtras(); else if (A.tab === 'avisos') avisos(); else if (A.tab === 'msg') mensagens(); else if (A.tab === 'folgas') folgas(); else importar();
   }
 
   function login() {
@@ -76,7 +84,7 @@
     var go = function () {
       var pw = document.getElementById('pw').value; if (!pw) return;
       A.pass = pw; busy('Verificando…');
-      api('admin_login').then(function () { sessionStorage.setItem('rda_admin', pw); done('Bem-vinda!'); render(); })
+      api('admin_login').then(function (r) { sessionStorage.setItem('rda_admin', pw); if (r.vapid) sessionStorage.setItem('rda_vapid', r.vapid); done('Bem-vinda!'); render(); setTimeout(function () { tourAdmin(); }, 500); })
         .catch(function (e) { A.pass = ''; done(e.message); });
     };
     document.getElementById('go').onclick = go;
@@ -88,11 +96,12 @@
     var el = document.getElementById('adm');
     el.innerHTML = '<div class="card"><div class="row" style="align-items:end;flex-wrap:wrap"><div><label class="f" style="margin-top:0">Até o dia</label><input type="date" id="dd" value="' + A.date + '"></div>' +
       '<div><label class="f" style="margin-top:0">Período</label><select id="per"><option value="7">7 dias</option><option value="15">15 dias</option><option value="31">31 dias</option></select></div></div>' +
-      '<label class="chk"><input type="checkbox" id="todos"' + (A.todos ? ' checked' : '') + '> Mostrar também quem não entrega RDA</label></div><div id="ent"><p class="empty">Carregando…</p></div>';
+      '<label class="chk"><input type="checkbox" id="todos"' + (A.todos ? ' checked' : '') + '> Mostrar também quem não entrega RDA</label><button class="btn sm ghost" id="quem" style="margin-top:8px">👷 Quem faz RDA (recebe cobrança e alertas)</button></div><div id="ent"><p class="empty">Carregando…</p></div>';
     document.getElementById('per').value = String(A.dias);
     document.getElementById('dd').onchange = function () { A.date = this.value; entregas(); };
     document.getElementById('per').onchange = function () { A.dias = +this.value; entregas(); };
     document.getElementById('todos').onchange = function () { A.todos = this.checked; entregas(); };
+    document.getElementById('quem').onclick = quemFaz;
     var de = addDays(A.date, -(A.dias - 1));
     loadControle(de, A.date).then(function (j) {
       var days = []; for (var i = A.dias - 1; i >= 0; i--) days.push(addDays(A.date, -i));
@@ -105,7 +114,7 @@
       var pend = [];
       encs.forEach(function (e) { days.forEach(function (d) { var c = controle(j, e, d); if (c.status === 'Pendente') pend.push({ e: e, d: d, c: c }); }); });
       var line = function (x) {
-        return '<div class="rdaline"><div class="tx"><b>' + esc(x.e.curto || x.e.nome) + ' · ' + br(x.d) + '</b><small>' + esc(x.c.numero) + ' · prazo ' + br(x.c.prevista) + (x.c.atraso ? ' · <b style="color:var(--bad)">' + x.c.atraso + ' dia(s) de atraso</b>' : '') + '</small></div><button class="btn sm ghost" data-sit="' + esc(x.e.nome) + '|' + x.d + '">Situação</button></div>';
+        return '<div class="rdaline"><div class="tx"><b>' + esc(x.e.curto || x.e.nome) + ' · ' + br(x.d) + '</b><small>' + esc(x.c.numero) + ' · prazo ' + br(x.c.prevista).slice(0, 5) + ' 12:00' + (x.c.atraso ? ' · <b style="color:var(--bad)">' + x.c.atraso + ' dia(s) de atraso</b>' : '') + '</small></div><button class="btn sm ghost" data-sit="' + esc(x.e.nome) + '|' + x.d + '">Situação</button></div>';
       };
       var pDia = pend.filter(function (x) { return x.d === A.date; }), pAnt = pend.filter(function (x) { return x.d !== A.date; }).reverse();
       h += '<div class="card"><div class="card-h"><h2>Pendentes de ' + br(A.date) + ' (' + pDia.length + ')</h2></div>' + (pDia.length ? pDia.map(line).join('') : '<p class="empty">Ninguém pendente neste dia ✓</p>') +
@@ -118,10 +127,11 @@
           if (c.via) return '<td class="ok" data-id="' + esc(c.via.id) + '" title="' + esc(c.obs) + '" style="background:#e3f2fd;color:#0b4f9c">✓<br><small>' + esc((c.via.enc || '').split(' ')[0]) + '</small></td>';
           if (c.rda) return '<td class="ok" data-id="' + esc(c.rda.id) + '" title="' + esc(c.numero) + '"' + (c.atraso ? ' style="background:#fff1e6;color:#a34600"' : '') + '>✓' + (c.atraso ? '<br><small>+' + c.atraso + 'd</small>' : '') + '</td>';
           if (c.status === 'Pendente') return '<td class="pend" data-sit="' + key + '" title="' + esc(c.sit) + '">✗</td>';
+          if (c.status === 'No prazo') return '<td data-sit="' + key + '" style="background:#fff8e1;color:#a36b00;font-weight:700" title="Prazo ' + esc(br(c.prazo.slice(0, 10)) + ' 12:00') + '">…</td>';
           return '<td class="na" data-sit="' + key + '" title="' + esc(c.sit + (c.obs ? ' – ' + c.obs : '')) + '"><small>' + esc(ABREV[c.sit] || c.sit.slice(0, 3)) + '</small></td>';
         }).join('') + '</tr>';
       });
-      h += '</tbody></table></div><p class="small muted">✓ entregue (toque para o PDF; laranja = entregue com atraso; azul = consta no RDA de outro encarregado, com o nome dele embaixo) · ✗ pendente · siglas = situação que não cobra RDA (DSR, FER, F.C = folga de campo, PAR, CHU, N/T = não tem RDA…). Toque num dia sem RDA para mudar a situação.</p></div>';
+      h += '</tbody></table></div><p class="small muted">✓ entregue (toque para o PDF; laranja = entregue com atraso; azul = consta no RDA de outro encarregado) · … ainda no prazo (até 12:00 do próximo dia de atividade) · ✗ atrasado · siglas = situação que não cobra RDA (DSR, FER, F.C = folga de campo, PAR, CHU, N/T = não tem RDA…). Toque num dia sem RDA para mudar a situação.</p></div>';
       document.getElementById('ent').innerHTML = h;
       [].forEach.call(document.querySelectorAll('td.ok'), function (td) { td.onclick = function () { pdfOne(td.dataset.id); }; });
       [].forEach.call(document.querySelectorAll('[data-sit]'), function (td) { td.onclick = function () { var k = td.dataset.sit.split('|'); situacao(j, k[0], k[1]); }; });
@@ -212,7 +222,7 @@
         j.encarregados.forEach(function (e) {
           var c = controle(j, e, d);
           if (!e.cobra && !c.rda) return;
-          ctl.push([c.via ? c.via.numero : c.numero, e.disciplina, e.curto || e.nome, br(d), DIAS_EXT[dow(d)], br(c.prevista), c.entrega ? br(c.entrega) : '', c.status, c.atraso, c.sit, c.cobra ? 'SIM' : 'NÃO', c.obs || '']);
+          ctl.push([c.via ? c.via.numero : c.numero, e.disciplina, e.curto || e.nome, br(d), DIAS_EXT[dow(d)], br(c.prevista) + ' 12:00', c.entrega ? br(c.entrega) : '', c.status, c.atraso, c.sit, c.cobra ? 'SIM' : 'NÃO', c.obs || '']);
         });
       }
       sheets.push({ name: 'Controle de recebimento', rows: ctl });
@@ -227,10 +237,45 @@
     var el = document.getElementById('adm');
     el.innerHTML = '<div class="card"><div class="card-h"><h2>Programação semanal</h2></div><p class="small muted" style="margin-top:0">Escolha o arquivo da programação da semana (.xlsx, mesmo modelo de sempre). Os encarregados passam a ver a programação no celular.</p>' +
       '<label class="btn block">📋 Escolher programação…<input type="file" id="fprog" accept=".xlsx" class="hidden"></label><div id="rprog"></div></div>' +
-      '<div class="card"><div class="card-h"><h2>Posição de frota (equipamentos)</h2></div><p class="small muted" style="margin-top:0">Escolha a planilha de posição de frota. A lista da aba CADASTRO vira a sugestão de equipamentos no RDA (equipamentos desmobilizados ficam de fora).</p>' +
-      '<label class="btn block ghost">🚜 Escolher posição de frota…<input type="file" id="ffrota" accept=".xlsx" class="hidden"></label><div id="rfrota"></div></div>';
+      '<div class="card"><div class="card-h"><h2>Posição de frota (equipamentos)</h2></div><p class="small muted" style="margin-top:0">Escolha a planilha de posição de frota. A lista da aba CADASTRO vira a sugestão de equipamentos no RDA. Ficam de fora os que estão como DESM (desmobilizado) na aba POSIÇÃO DE FROTA - ANALÍTICA na última data marcada até hoje.</p>' +
+      '<label class="btn block ghost">🚜 Escolher posição de frota…<input type="file" id="ffrota" accept=".xlsx" class="hidden"></label><div id="rfrota"></div></div>' +
+      '<div class="card"><div class="card-h"><h2>Projetos (lista do Greendocs)</h2></div><p class="small muted" style="margin-top:0">Quando sair revisão nova, exporte do Greendocs e escolha aqui a planilha (colunas Nome, Título Complementar e Revisão). Pode escolher as duas listas juntas (Projetos e PIM/CODEME). A lista do app é substituída por estas.</p>' +
+      '<label class="btn block ghost">📐 Escolher lista(s) do Greendocs…<input type="file" id="fgd" accept=".xlsx" multiple class="hidden"></label><div id="rgd"></div></div>';
     document.getElementById('fprog').onchange = function () { var f = this.files[0]; if (f) importProg(f); this.value = ''; };
     document.getElementById('ffrota').onchange = function () { var f = this.files[0]; if (f) importFrota(f); this.value = ''; };
+    document.getElementById('fgd').onchange = function () { var f = [].slice.call(this.files); if (f.length) importGreendocs(f); this.value = ''; };
+  }
+  function importGreendocs(files) {
+    var out = document.getElementById('rgd'); out.innerHTML = '<p class="empty">Lendo arquivo(s)…</p>';
+    var mapa = {};
+    libsXlsx().then(function () {
+      return files.reduce(function (c, file) {
+        return c.then(function () {
+          return window.readXlsx(file).then(function (book) {
+            var achou = false;
+            Object.keys(book).forEach(function (name) {
+              var rows = book[name];
+              for (var i = 0; i < Math.min(rows.length, 15); i++) {
+                var hdr = (rows[i] || []).map(H), cN = hdr.indexOf('NOME'), cT = hdr.indexOf('TITULO COMPLEMENTAR'), cR = hdr.indexOf('REVISAO');
+                if (cN < 0 || cR < 0) continue;
+                for (var r = i + 1; r < rows.length; r++) {
+                  var row = rows[r] || [], cod = String(row[cN] || '').trim().toUpperCase();
+                  if (!/^ALM-D-[A-Z]{2}-\d{4}-[A-Z]{3}-[A-Z]-\d{4}$/.test(cod)) continue;
+                  mapa[cod] = [cod, String(row[cT] || '').replace(/\s+/g, ' ').trim(), row[cR] == null ? '' : String(row[cR]).trim()];
+                }
+                achou = true; break;
+              }
+            });
+            if (!achou) throw new Error('O arquivo ' + file.name + ' não tem as colunas Nome / Revisão do Greendocs.');
+          });
+        });
+      }, Promise.resolve());
+    }).then(function () {
+      var itens = Object.keys(mapa).sort().map(function (k) { return mapa[k]; });
+      if (!itens.length) throw new Error('Nenhum documento encontrado.');
+      out.innerHTML = '<p class="empty">Enviando ' + itens.length + ' documentos…</p>';
+      return api('admin_setProjetos', { itens: itens }, 120000).then(function (r) { out.innerHTML = '<div class="alert ok">✓ ' + r.total + ' projetos atualizados. Os celulares recebem a lista nova na próxima sincronização.</div>'; });
+    }).catch(function (e) { out.innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
   }
   function libsXlsx() { return loadScript('jszip.min.js').then(function () { return loadScript('xlsxr.js'); }); }
   function H(s) { return U().norm(s).replace(/\s+/g, ' ').trim(); }
@@ -276,7 +321,20 @@
   function importFrota(file) {
     var out = document.getElementById('rfrota'); out.innerHTML = '<p class="empty">Lendo arquivo…</p>';
     libsXlsx().then(function () { return window.readXlsx(file); }).then(function (book) {
-      var itens = null;
+      var itens = null, desm = {}, K = function (v) { return U().norm(v).replace(/[^A-Z0-9]/g, ''); }, hj = today();
+      // aba POSIÇÃO DE FROTA - ANALITICA: última situação marcada até hoje; DESM = desmobilizado
+      Object.keys(book).forEach(function (name) {
+        if (H(name).indexOf('ANALITICA') < 0) return;
+        var rows = book[name], dcols = [];
+        for (var i = 0; i < Math.min(rows.length, 5) && !dcols.length; i++) (rows[i] || []).forEach(function (v, c) { if (typeof v === 'number' && v > 40000 && v < 60000 && window.xlsDate(v) <= hj) dcols.push(c); });
+        rows.forEach(function (row) {
+          var lab = String((row || [])[0] || ''); if (lab.indexOf(' - ') < 0) return;
+          var ult = '';
+          dcols.forEach(function (c) { var v = String(row[c] == null ? '' : row[c]).trim(); if (v && v !== '-') ult = v; });
+          if (H(ult) === 'DESM') desm[K(lab.split(' - ')[0])] = true;
+        });
+      });
+      var nDesm = 0;
       Object.keys(book).some(function (name) {
         var rows = book[name];
         for (var i = 0; i < Math.min(rows.length, 15); i++) {
@@ -288,6 +346,7 @@
           for (var r = i + 1; r < rows.length; r++) {
             var row = rows[r] || []; if (!row[cT]) continue;
             if (cX >= 0 && typeof row[cX] === 'number' && window.xlsDate(row[cX]) < today()) continue;
+            if (desm[K(row[cP])]) { nDesm++; continue; }
             var mm = String(row[cM] || '').trim();
             itens.push({ d: String(row[cT]).trim() + (mm ? ' - ' + mm : ''), t: String(row[cG] || '').trim(), p: String(row[cP] || '').trim(), f: String(row[cF] || '').trim() });
           }
@@ -296,7 +355,7 @@
         return false;
       });
       if (!itens || !itens.length) throw new Error('Não encontrei a aba de cadastro (coluna TIPO EQUIPAMENTO).');
-      return api('admin_setEquip', { itens: itens }).then(function (r) { out.innerHTML = '<div class="alert ok">✓ ' + r.itens + ' equipamentos atualizados. Os celulares recebem a lista na próxima sincronização.</div>'; });
+      return api('admin_setEquip', { itens: itens }).then(function (r) { out.innerHTML = '<div class="alert ok">✓ ' + r.itens + ' equipamentos atualizados' + (nDesm ? ' (' + nDesm + ' desmobilizado(s) na aba ANALÍTICA ficaram de fora)' : '') + '. Os celulares recebem a lista na próxima sincronização.</div>'; });
     }).catch(function (e) { out.innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
   }
 
@@ -399,6 +458,141 @@
       var c = j.config;
       document.getElementById('hecfg').innerHTML = '<div class="card"><div class="card-h"><h2>Regras</h2></div><div class="small">Prazo do pedido: até <b>' + esc(c.HE_PRAZO) + '</b> (extensão: do próprio dia; escala: do último dia útil antes) · Extensão até <b>' + esc(c.HE_SEMANA_MAX) + '</b> (seg a qui) e <b>' + esc(c.HE_SEXTA_MAX) + '</b> (sexta) · Sábado: <b>' + (c.SABADO_ESCALA === 'SIM' ? 'é escala' : 'é dia útil') + '</b> · Fora do prazo: <b>' + (c.HE_FORA_PRAZO === 'BLOQUEAR' ? 'bloqueia' : 'envia com aviso para você decidir') + '</b></div></div>';
     }).catch(function (e) { document.getElementById('helst').innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
+  }
+
+
+  /* ---------- quem faz RDA ---------- */
+  function quemFaz() {
+    busy('Carregando…');
+    api('admin_list', { de: today(), ate: today() }).then(function (j) {
+      done('');
+      var encs = j.encarregados.slice().sort(function (a, b) { return (a.disciplina + a.nome).localeCompare(b.disciplina + b.nome); });
+      var b = sheetUI('<h3>👷 Quem faz RDA</h3><p class="small muted">Marcados: entram no controle de recebimento e recebem os alertas de prazo e os lembretes de hora extra.</p>' +
+        encs.map(function (e) { return '<label class="person" style="cursor:pointer"><input type="checkbox" data-cb="' + esc(e.nome) + '"' + (e.cobra ? ' checked' : '') + ' style="width:28px;height:28px;min-height:0;flex:0 0 28px"><div class="pinfo"><b>' + esc(e.nome) + '</b><small>' + esc(e.disciplina) + '</small></div></label>'; }).join('') +
+        '<button class="btn block" style="margin-top:12px" onclick="document.getElementById(\'sheet\').classList.add(\'hidden\')">Fechar</button>');
+      [].forEach.call(b.querySelectorAll('[data-cb]'), function (c) {
+        c.onchange = function () { api('admin_setCobra', { enc: c.dataset.cb, cobra: c.checked }).then(function () { done('Salvo ✓'); }).catch(function (e) { done('Erro: ' + e.message); c.checked = !c.checked; }); };
+      });
+    }).catch(function (e) { done('Erro: ' + e.message); });
+  }
+
+  /* ---------- avisos (sininho da administração) ---------- */
+  function avisos() {
+    var el = document.getElementById('adm');
+    var perm = ('Notification' in window) ? Notification.permission : 'indisponível';
+    el.innerHTML = '<div class="card"><div class="card-h"><h2>Notificações neste aparelho</h2></div><p class="small muted" style="margin-top:0">Você recebe um resumo a cada hora com as novidades (RDAs enviados, alterados ou atrasados, pedidos de hora extra, mudanças de equipe). O mesmo resumo vai para o seu e-mail.</p>' +
+      '<div class="row"><button class="btn orange" id="anot">🔔 ' + (perm === 'granted' ? 'Reativar notificações' : 'Ativar notificações') + '</button><button class="btn ghost" id="atest">Enviar teste</button></div>' +
+      '<button class="btn ghost block" style="margin-top:8px" id="ainst">📲 Instalar como aplicativo</button></div><div class="card"><div class="card-h"><h2>Últimos avisos</h2></div><div id="alist"><p class="empty">Carregando…</p></div></div>';
+    document.getElementById('ainst').onclick = function () { window.RDA_INSTALL(); };
+    document.getElementById('anot').onclick = function () {
+      window.RDA_PUSH.setVapid(sessionStorage.getItem('rda_vapid'));
+      window.RDA_PUSH.ativar(function (sub) { return api('admin_pushSubscribe', { sub: sub }).then(function (r) { return DB.put('kv', 'adminToken', r.token); }); });
+    };
+    document.getElementById('atest').onclick = function () { busy('Enviando…'); api('admin_testPush').then(function (r) { done(r.enviados ? 'Teste enviado para ' + r.enviados + ' aparelho(s)' : 'Nenhum aparelho com notificação ativa'); }).catch(function (e) { done('Erro: ' + e.message); }); };
+    api('admin_inbox').then(function (r) {
+      document.getElementById('alist').innerHTML = (r.mensagens || []).map(function (m) {
+        return '<div style="border-left:4px solid #0b2a5b;background:#f6f8fb;border-radius:10px;padding:10px 12px;margin-bottom:8px"><b>' + esc(m.titulo) + '</b><div class="small" style="white-space:pre-line;margin-top:4px">' + esc(m.texto) + '</div><small class="muted">' + esc(br(m.em.slice(0, 10))) + ' ' + esc(m.em.slice(11, 16)) + '</small></div>';
+      }).join('') || '<p class="empty">Nenhum aviso ainda. O primeiro resumo chega na próxima hora cheia em que houver novidade.</p>';
+    }).catch(function (e) { document.getElementById('alist').innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
+  }
+
+  /* ---------- mensagens para os encarregados ---------- */
+  function mensagens() {
+    var el = document.getElementById('adm');
+    el.innerHTML = '<p class="empty">Carregando…</p>';
+    api('admin_list', { de: today(), ate: today() }).then(function (j) {
+      var encs = j.encarregados.slice().sort(function (a, b) { return (a.disciplina + a.nome).localeCompare(b.disciplina + b.nome); });
+      var discs = []; encs.forEach(function (e) { if (discs.indexOf(e.disciplina) < 0) discs.push(e.disciplina); });
+      var sel = {};
+      el.innerHTML = '<div class="card"><div class="card-h"><h2>✉️ Novo aviso</h2></div><label class="f" style="margin-top:0">Título</label><input id="mt" maxlength="60" placeholder="Ex.: Reunião de segurança">' +
+        '<label class="f">Mensagem</label><textarea id="mx" placeholder="Escreva o aviso"></textarea>' +
+        '<label class="f">Para quem</label><div class="chips"><button data-q="todos">Todos</button><button data-q="rda">Quem faz RDA</button><button data-q="nenhum">Limpar</button></div>' +
+        '<div class="small muted">Por disciplina:</div><div class="chips">' + discs.map(function (d) { return '<button data-d="' + esc(d) + '">' + esc(d) + '</button>'; }).join('') + '</div>' +
+        '<div id="mlist" style="max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:0 10px;margin-top:6px"></div>' +
+        '<button class="btn orange block" id="msend" style="margin-top:12px">📤 Enviar aviso</button></div>';
+      function draw() {
+        document.getElementById('mlist').innerHTML = encs.map(function (e) { return '<label class="person" style="cursor:pointer;padding:6px 0"><input type="checkbox" data-p="' + esc(e.nome) + '"' + (sel[e.nome] ? ' checked' : '') + ' style="width:24px;height:24px;min-height:0;flex:0 0 24px"><div class="pinfo"><b style="font-size:15px">' + esc(e.nome) + '</b><small>' + esc(e.disciplina) + '</small></div></label>'; }).join('');
+        [].forEach.call(document.querySelectorAll('[data-p]'), function (c) { c.onchange = function () { sel[c.dataset.p] = c.checked; cnt(); }; });
+        cnt();
+      }
+      function cnt() { var n = Object.keys(sel).filter(function (k) { return sel[k]; }).length; document.getElementById('msend').textContent = '📤 Enviar aviso' + (n ? ' para ' + n + ' pessoa(s)' : ''); }
+      [].forEach.call(el.querySelectorAll('[data-q]'), function (b) { b.onclick = function () { var q = b.dataset.q; sel = {}; if (q !== 'nenhum') encs.forEach(function (e) { if (q === 'todos' || e.cobra) sel[e.nome] = true; }); draw(); }; });
+      [].forEach.call(el.querySelectorAll('[data-d]'), function (b) { b.onclick = function () { encs.forEach(function (e) { if (e.disciplina === b.dataset.d) sel[e.nome] = true; }); draw(); }; });
+      draw();
+      document.getElementById('msend').onclick = function () {
+        var para = Object.keys(sel).filter(function (k) { return sel[k]; }), t = document.getElementById('mt').value.trim(), x = document.getElementById('mx').value.trim();
+        if (!t || !x) return done('Preencha o título e a mensagem');
+        if (!para.length) return done('Escolha para quem enviar');
+        if (!confirm('Enviar "' + t + '" para ' + para.length + ' encarregado(s)?')) return;
+        busy('Enviando…');
+        api('admin_sendMsg', { para: para, titulo: t, texto: x }, 120000).then(function (r) { done('Aviso enviado para ' + r.enviados + ' encarregado(s) ✓'); mensagens(); }).catch(function (e) { done('Erro: ' + e.message); });
+      };
+    }).catch(function (e) { el.innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
+  }
+
+  /* ---------- ajuda da administração ---------- */
+  var TOUR_ADM = [
+    ['📊', 'Recebimento', 'Mostra quem entregou o RDA, quem está no prazo (até 12:00 do próximo dia de atividade) e quem está atrasado. Toque num dia sem RDA para marcar a situação (folga de campo, paralisação…). Em <b>"Quem faz RDA"</b> você escolhe quem é cobrado.'],
+    ['📄', 'RDAs e exportação', 'Escolha o período e baixe o <b>PDF</b> (no modelo do RDA impresso, com as fotos) ou a <b>planilha</b> com todos os registros e o controle de recebimento.'],
+    ['⏱', 'Horas extras', 'Aprove ou reprove os pedidos de extensão e escala. Daqui saem as <b>permissões</b> em PDF e a lista nominal do dia.'],
+    ['🔔', 'Avisos', 'Ative as notificações neste aparelho para receber o resumo de hora em hora. O mesmo resumo vai para o seu e-mail.'],
+    ['✉️', 'Mensagens', 'Envie avisos para todos, por disciplina ou para pessoas escolhidas. Eles recebem no celular e no sininho do app.'],
+    ['⬆️', 'Programação, frota e projetos', 'Toda semana importe a programação semanal; quando mudar a frota, importe a posição de frota; quando sair revisão nova no Greendocs, importe a lista de projetos. Em <b>📅 Feriados</b> marque os feriados da obra.']
+  ];
+  function tourAdmin(force) {
+    DB.get('kv', 'tourAdm1').then(function (v) {
+      if (v && !force) return;
+      var i = 0;
+      function step() {
+        var t = TOUR_ADM[i];
+        var b = sheetUI('<div style="text-align:center;font-size:50px;margin:4px 0">' + t[0] + '</div><h3 style="text-align:center">' + t[1] + '</h3><div style="font-size:16px;line-height:1.5">' + t[2] + '</div>' +
+          '<div style="display:flex;justify-content:center;gap:6px;margin:14px 0">' + TOUR_ADM.map(function (_, k) { return '<span style="width:9px;height:9px;border-radius:50%;background:' + (k === i ? 'var(--navy)' : '#c9d1dd') + '"></span>'; }).join('') + '</div>' +
+          '<div class="row"><button class="btn ghost" id="tb">' + (i ? '‹ Voltar' : 'Pular') + '</button><button class="btn" id="tn">' + (i === TOUR_ADM.length - 1 ? 'Começar ✓' : 'Próximo ›') + '</button></div>');
+        b.querySelector('#tn').onclick = function () { if (i === TOUR_ADM.length - 1) { closeUI(); DB.put('kv', 'tourAdm1', 1); } else { i++; step(); } };
+        b.querySelector('#tb').onclick = function () { if (i) { i--; step(); } else { closeUI(); DB.put('kv', 'tourAdm1', 1); } };
+      }
+      step();
+    });
+  }
+
+
+  /* ---------- folgas de campo ---------- */
+  function folgas() {
+    var el = document.getElementById('adm');
+    el.innerHTML = '<p class="empty">Carregando…</p>';
+    Promise.all([api('admin_folgas'), api('admin_list', { de: today(), ate: today() })]).then(function (x) {
+      var lista = x[0].folgas.sort(function (a, b) { return a.ini < b.ini ? 1 : -1; }), encs = x[1].encarregados.slice().sort(function (a, b) { return a.nome.localeCompare(b.nome); });
+      el.innerHTML = '<div class="card"><div class="card-h"><h2>🏖 Registrar folga de campo</h2></div>' +
+        '<label class="f" style="margin-top:0">Encarregado</label><select id="fe"><option value="">Escolha…</option>' + encs.map(function (e) { return '<option>' + esc(e.nome) + '</option>'; }).join('') + '</select>' +
+        '<div class="grid2"><div><label class="f">Início</label><input type="date" id="fi"></div><div><label class="f">Fim</label><input type="date" id="ff"></div></div>' +
+        '<label class="f">Quem faz o RDA no período</label><select id="ft"><option value="">Ninguém (equipe transferida ou parada) – não cobra RDA</option><option value="MEMBRO">Alguém da própria equipe</option><option value="ENCARREGADO">Outro encarregado</option></select>' +
+        '<div id="fsbox" class="hidden"><label class="f">Nome</label><input id="fs" list="fsl" placeholder="Digite o nome"><datalist id="fsl"></datalist></div>' +
+        '<label class="f">Observação</label><input id="fo">' +
+        '<button class="btn orange block" id="fsave" style="margin-top:12px">Salvar folga</button></div>' +
+        '<div class="card"><div class="card-h"><h2>Folgas registradas</h2></div>' + (lista.map(function (f) {
+          var at = f.ini <= today() && today() <= f.fim;
+          return '<div class="rdaline"><div class="tx"><b>' + esc(f.enc) + (at ? ' <span class="tag" style="background:#e3f2fd;color:#0b4f9c">de folga agora</span>' : '') + '</b><small>' + br(f.ini) + ' a ' + br(f.fim) + ' · ' + (f.subst ? 'RDA por ' + esc(f.subst) + (f.tipo === 'ENCARREGADO' ? ' (encarregado)' : ' (da equipe)') : 'sem RDA no período') + (f.obs ? ' · ' + esc(f.obs) : '') + '</small></div><button class="btn sm danger" data-fdel="' + esc(f.id) + '">Excluir</button></div>';
+        }).join('') || '<p class="empty">Nenhuma folga registrada</p>') + '</div>';
+      var ft = document.getElementById('ft'), fe = document.getElementById('fe');
+      function opts() {
+        var t = ft.value; document.getElementById('fsbox').classList.toggle('hidden', !t);
+        var nomes = t === 'ENCARREGADO' ? encs.filter(function (e) { return e.nome !== fe.value; }).map(function (e) { return e.nome; }) : (x[1].efetivo || []);
+        document.getElementById('fsl').innerHTML = nomes.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('');
+      }
+      ft.onchange = opts; fe.onchange = function () {
+        if (ft.value === 'MEMBRO') api('bootstrap', { enc: fe.value }).then(function (b) { x[1].efetivo = b.efetivo.filter(function (p) { return p.enc === fe.value; }).map(function (p) { return p.nome; }); opts(); });
+        else opts();
+      };
+      ft.addEventListener('change', function () { if (ft.value === 'MEMBRO' && fe.value) fe.onchange(); });
+      document.getElementById('fsave').onclick = function () {
+        var f = { enc: fe.value, ini: document.getElementById('fi').value, fim: document.getElementById('ff').value, tipo: ft.value, subst: ft.value ? document.getElementById('fs').value.trim() : '', obs: document.getElementById('fo').value.trim() };
+        if (!f.enc || !f.ini || !f.fim) return done('Preencha encarregado, início e fim');
+        if (f.fim < f.ini) return done('O fim é antes do início');
+        if (f.tipo && !f.subst) return done('Informe quem faz o RDA');
+        busy('Salvando…'); api('admin_setFolga', { folga: f }).then(function () { done('Folga registrada ✓'); folgas(); }).catch(function (e) { done('Erro: ' + e.message); });
+      };
+      [].forEach.call(el.querySelectorAll('[data-fdel]'), function (b) { b.onclick = function () { if (!confirm('Excluir esta folga?')) return; api('admin_setFolga', { folga: { id: b.dataset.fdel }, remove: true }).then(function () { done('Excluída'); folgas(); }); }; });
+    }).catch(function (e) { el.innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
   }
 
   window.RDA_ADMIN = { render: render };
