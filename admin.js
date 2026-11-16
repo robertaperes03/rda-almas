@@ -165,11 +165,33 @@
     api('admin_list', { de: A.de, ate: A.ate }).then(function (j) {
       A.list = j.rdas.sort(function (a, b) { return (a.date + a.disciplina + a.enc).localeCompare(b.date + b.disciplina + b.enc); });
       document.getElementById('lst').innerHTML = '<div class="card-h"><h2>' + A.list.length + ' RDA(s)</h2></div>' + (A.list.map(function (r) {
-        return '<div class="rdaline"><div class="tx"><b>' + esc(r.numero) + '</b><small>' + br(r.date) + ' · ' + esc(r.enc) + ' · ' + r.presentes + '/' + r.equipe + ' presentes · ' + r.atividades + ' ativ. · ' + r.fotos + ' fotos' + (r.versao > 1 ? ' · reenviado (v' + r.versao + ')' : '') + (r.armacao ? ' · 🔩 ' + r.armacao + ' linha(s) de armação' : '') + '</small></div>' + (r.armacao ? '<button class="btn sm" style="background:#00695c" data-arm="' + esc(r.id) + '">🔩</button>' : '') + '<button class="btn sm" data-id="' + esc(r.id) + '">PDF</button></div>';
+        return '<div class="rdaline"><div class="tx"><b>' + esc(r.numero) + '</b><small>' + br(r.date) + ' · ' + esc(r.enc) + ' · ' + r.presentes + '/' + r.equipe + ' presentes · ' + r.atividades + ' ativ. · ' + r.fotos + ' fotos' + (r.versao > 1 ? ' · reenviado (v' + r.versao + ')' : '') + (r.armacao ? ' · 🔩 ' + r.armacao + ' linha(s) de armação' : '') + '</small></div>' + (r.armacao ? '<button class="btn sm" style="background:#00695c" data-arm="' + esc(r.id) + '">🔩</button>' : '') + '<button class="btn sm ghost" title="Mudar data" data-mv="' + esc(r.id) + '">📅</button>' + '<button class="btn sm" data-id="' + esc(r.id) + '">PDF</button></div>';
       }).join('') || '<p class="empty">Nenhum RDA no período</p>');
       [].forEach.call(document.querySelectorAll('#lst [data-id]'), function (b) { b.onclick = function () { pdfOne(b.dataset.id); }; });
       [].forEach.call(document.querySelectorAll('#lst [data-arm]'), function (b) { b.onclick = function () { pdfOne(b.dataset.arm, true); }; });
+      [].forEach.call(document.querySelectorAll('#lst [data-mv]'), function (b) { b.onclick = function () { mudaData(A.list.filter(function (r) { return r.id === b.dataset.mv; })[0]); }; });
     }).catch(function (e) { document.getElementById('lst').innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
+  }
+
+  // corrige a data de um RDA enviado com a data errada
+  function mudaData(r) {
+    if (!r) return;
+    var b = sheetUI('<h3>📅 Mudar data do RDA</h3><p><b>' + esc(r.numero) + '</b><br><small class="muted">' + esc(r.enc) + ' · enviado com a data <b>' + br(r.date) + '</b></small></p>' +
+      '<label class="f">Data correta</label><input type="date" id="mvd" max="' + today() + '">' +
+      '<p class="small muted">Tudo vai para a data nova: equipe, atividades, fotos, armação e recebimento. O número do RDA é recalculado e o celular do encarregado se ajusta sozinho na próxima vez que abrir o app, liberando a data antiga para um RDA novo.</p>' +
+      '<div class="alert" id="mvx" style="display:none"></div>' +
+      '<button class="btn block" id="mvok">Mudar data</button><button class="btn block ghost" id="mvno" style="margin-top:8px">Cancelar</button>');
+    b.querySelector('#mvno').onclick = closeUI;
+    b.querySelector('#mvok').onclick = function () {
+      var d = b.querySelector('#mvd').value, x = b.querySelector('#mvx');
+      if (!d) { x.style.display = ''; x.textContent = 'Escolha a data correta.'; return; }
+      if (d === r.date) { x.style.display = ''; x.textContent = 'O RDA já está nessa data.'; return; }
+      var bt = this; bt.disabled = true; bt.textContent = 'Mudando…';
+      api('admin_moveRda', { id: r.id, data: d }).then(function (j) {
+        closeUI(); done('RDA movido para ' + br(j.para) + ' · novo nº ' + j.numero);
+        if (A.de > d) A.de = d; exportar();
+      }).catch(function (e) { bt.disabled = false; bt.textContent = 'Mudar data'; x.style.display = ''; x.textContent = e.message; });
+    };
   }
 
   function fetchFull(id, semFotos) {
