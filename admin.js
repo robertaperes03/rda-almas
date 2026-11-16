@@ -165,7 +165,7 @@
     api('admin_list', { de: A.de, ate: A.ate }).then(function (j) {
       A.list = j.rdas.sort(function (a, b) { return (a.date + a.disciplina + a.enc).localeCompare(b.date + b.disciplina + b.enc); });
       document.getElementById('lst').innerHTML = '<div class="card-h"><h2>' + A.list.length + ' RDA(s)</h2></div>' + (A.list.map(function (r) {
-        return '<div class="rdaline"><div class="tx"><b>' + esc(r.numero) + '</b><small>' + br(r.date) + ' · ' + esc(r.enc) + ' · ' + r.presentes + '/' + r.equipe + ' presentes · ' + r.atividades + ' ativ. · ' + r.fotos + ' fotos' + (r.versao > 1 ? ' · reenviado (v' + r.versao + ')' : '') + (r.armacao ? ' · 🔩 ' + r.armacao + ' linha(s) de armação' : '') + '</small></div>' + (r.armacao ? '<button class="btn sm" style="background:#00695c" data-arm="' + esc(r.id) + '">🔩</button>' : '') + '<button class="btn sm ghost" title="Mudar data" data-mv="' + esc(r.id) + '">📅</button>' + '<button class="btn sm" data-id="' + esc(r.id) + '">PDF</button></div>';
+        return '<div class="rdaline"><div class="tx"><b>' + esc(r.numero) + '</b><small>' + br(r.date) + ' · ' + esc(r.enc) + ' · ' + r.presentes + '/' + r.equipe + ' presentes · ' + r.atividades + ' ativ. · ' + r.fotos + ' fotos' + (r.versao > 1 ? ' · reenviado (v' + r.versao + ')' : '') + (r.armacao ? ' · 🔩 ' + r.armacao + ' linha(s) de armação' : '') + '</small></div>' + (r.armacao ? '<button class="btn sm" style="background:#00695c" data-arm="' + esc(r.id) + '">🔩</button>' : '') + '<button class="btn sm ghost" title="Mudar data ou excluir" data-mv="' + esc(r.id) + '">✏️</button>' + '<button class="btn sm" data-id="' + esc(r.id) + '">PDF</button></div>';
       }).join('') || '<p class="empty">Nenhum RDA no período</p>');
       [].forEach.call(document.querySelectorAll('#lst [data-id]'), function (b) { b.onclick = function () { pdfOne(b.dataset.id); }; });
       [].forEach.call(document.querySelectorAll('#lst [data-arm]'), function (b) { b.onclick = function () { pdfOne(b.dataset.arm, true); }; });
@@ -176,12 +176,22 @@
   // corrige a data de um RDA enviado com a data errada
   function mudaData(r) {
     if (!r) return;
-    var b = sheetUI('<h3>📅 Mudar data do RDA</h3><p><b>' + esc(r.numero) + '</b><br><small class="muted">' + esc(r.enc) + ' · enviado com a data <b>' + br(r.date) + '</b></small></p>' +
-      '<label class="f">Data correta</label><input type="date" id="mvd" max="' + today() + '">' +
+    var b = sheetUI('<h3>✏️ Corrigir RDA</h3><p><b>' + esc(r.numero) + '</b><br><small class="muted">' + esc(r.enc) + ' · enviado com a data <b>' + br(r.date) + '</b></small></p>' +
+      '<h4 style="margin:14px 0 4px">📅 Mudar a data</h4><label class="f">Data correta</label><input type="date" id="mvd" max="' + today() + '">' +
       '<p class="small muted">Tudo vai para a data nova: equipe, atividades, fotos, armação e recebimento. O número do RDA é recalculado e o celular do encarregado se ajusta sozinho na próxima vez que abrir o app, liberando a data antiga para um RDA novo.</p>' +
       '<div class="alert" id="mvx" style="display:none"></div>' +
-      '<button class="btn block" id="mvok">Mudar data</button><button class="btn block ghost" id="mvno" style="margin-top:8px">Cancelar</button>');
+      '<button class="btn block" id="mvok">Mudar data</button>' +
+      '<h4 style="margin:22px 0 4px">🗑 Excluir o RDA</h4><p class="small muted">Use para RDA enviado por engano ou repetido. Uma cópia fica guardada na aba RDA_EXCLUIDOS da planilha. No celular do encarregado o dia volta como <b>rascunho</b>, com o conteúdo, para corrigir e enviar de novo se precisar.</p>' +
+      '<button class="btn block danger" id="dlok">Excluir este RDA</button>' +
+      '<button class="btn block ghost" id="mvno" style="margin-top:14px">Cancelar</button>');
     b.querySelector('#mvno').onclick = closeUI;
+    b.querySelector('#dlok').onclick = function () {
+      var bt = this;
+      if (bt.dataset.conf !== '1') { bt.dataset.conf = '1'; bt.textContent = 'Toque de novo para confirmar a exclusão'; return; }
+      bt.disabled = true; bt.textContent = 'Excluindo…';
+      api('admin_delRda', { id: r.id }).then(function (j) { closeUI(); done('RDA ' + j.numero + ' (' + br(j.data) + ') excluído'); exportar(); })
+        .catch(function (e) { bt.disabled = false; bt.dataset.conf = ''; bt.textContent = 'Excluir este RDA'; var x = b.querySelector('#mvx'); x.style.display = ''; x.textContent = e.message; });
+    };
     b.querySelector('#mvok').onclick = function () {
       var d = b.querySelector('#mvd').value, x = b.querySelector('#mvx');
       if (!d) { x.style.display = ''; x.textContent = 'Escolha a data correta.'; return; }
