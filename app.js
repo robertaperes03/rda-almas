@@ -71,8 +71,25 @@
       if (b.refs && !b.refs.same) { S.refs = b.refs; DB.put('kv', 'refs', b.refs); }
       delete b.refs;
       S.boot = b; S.online = true;
-      return DB.put('kv', 'boot', b).then(function () { return migraRenomes(b.renomes); }).then(function () { return aplicaMovidos(b.movidos); }).then(function () { return applyLocalTeamOps(); }).then(function () { return true; });
+      return DB.put('kv', 'boot', b).then(function () { return migraRenomes(b.renomes); }).then(function () { return aplicaMovidos(b.movidos); }).then(function () { return aplicaExcluidos(b.excluidos); }).then(function () { return applyLocalTeamOps(); }).then(function () { return true; });
     }).catch(function (e) { if (e.auth) { S.key = ''; DB.del('kv', 'key'); render(); } return false; });
+  }
+  // RDA que a administração excluiu: no celular o dia volta como rascunho, com o conteúdo
+  function aplicaExcluidos(m) {
+    if (!m || !S.me || !Object.keys(m).length) return Promise.resolve();
+    var enc = S.me.nome, mudou = false;
+    return Object.keys(m).reduce(function (pr, dia) {
+      var info = m[dia], flag = 'del:' + enc + '|' + dia;
+      return pr.then(function () { return DB.get('kv', flag); }).then(function (vis) {
+        if (vis === info.em) return;
+        return DB.get('drafts', enc + '|' + dia).then(function (d) {
+          if (!d || (d.state !== 'enviado' && (d.updatedAt || 0) > info.em)) return;
+          d.state = 'rascunho'; mudou = true;
+          if (S.draft && S.draft.id === d.id) S.draft = d;
+          return DB.put('drafts', d.id, d);
+        }).then(function () { return DB.put('kv', flag, info.em); });
+      });
+    }, Promise.resolve()).then(function () { if (mudou) setTimeout(function () { if (location.hash !== '#admin' && !S.view) render(); }, 0); });
   }
   // RDA que a administração mudou de data (ex.: enviado no dia 16 mas era do dia 13)
   function aplicaMovidos(m) {
