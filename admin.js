@@ -156,11 +156,12 @@
   function exportar() {
     var el = document.getElementById('adm');
     el.innerHTML = '<div class="card"><div class="grid2"><div><label class="f" style="margin-top:0">De</label><input type="date" id="de" value="' + A.de + '"></div><div><label class="f" style="margin-top:0">Até</label><input type="date" id="ate" value="' + A.ate + '"></div></div>' +
-      '<div class="row" style="margin-top:12px"><button class="btn ok" id="xls">📊 Planilha (.xlsx)</button><button class="btn" id="pdfall">📄 PDF de todos</button></div><button class="btn block" id="pdfarm" style="margin-top:8px;background:#00695c">🔩 Montagem de armação (PDF)</button></div><div class="card" id="lst"><p class="empty">Carregando…</p></div>';
+      '<div class="row" style="margin-top:12px"><button class="btn ok" id="xls">📊 Planilha (.xlsx)</button><button class="btn" id="pdfall">📄 PDF de todos</button></div><button class="btn block" id="pdfarm" style="margin-top:8px;background:#00695c">🔩 Montagem de armação (PDF)</button><button class="btn block ghost" id="quadro" style="margin-top:8px">👥 Quadro de equipes – último status (.xlsx)</button></div><div class="card" id="lst"><p class="empty">Carregando…</p></div>';
     document.getElementById('de').onchange = function () { A.de = this.value; if (A.ate < A.de) A.ate = A.de; exportar(); };
     document.getElementById('ate').onchange = function () { A.ate = this.value; exportar(); };
     document.getElementById('xls').onclick = planilha;
     document.getElementById('pdfall').onclick = function () { pdfMany(A.list || []); };
+    document.getElementById('quadro').onclick = quadroEquipes;
     document.getElementById('pdfarm').onclick = function () { pdfMany((A.list || []).filter(function (r) { return r.armacao; }), true); };
     api('admin_list', { de: A.de, ate: A.ate }).then(function (j) {
       A.list = j.rdas.sort(function (a, b) { return (a.date + a.disciplina + a.enc).localeCompare(b.date + b.disciplina + b.enc); });
@@ -249,6 +250,45 @@
       });
     }).then(function () { done('PDF pronto ✓'); }).catch(function (e) { done('Erro: ' + e.message); });
   }
+  // todo o efetivo, por encarregado, com o último status informado no RDA
+  function quadroEquipes() {
+    busy('Montando quadro de equipes…');
+    Promise.all([loadScript('jszip.min.js').then(function () { return loadScript('xlsxw.js'); }), api('admin_quadro', {}, 120000)]).then(function (x) {
+      var j = x[1], ps = j.pessoas.slice(), SEM = 'SEM RDA';
+      var st = function (p) { return p.status || SEM; };
+      ps.sort(function (a, b) { return (a.enc === j.livre) - (b.enc === j.livre) || String(a.enc).localeCompare(b.enc) || String(a.nome).localeCompare(b.nome); });
+      var cab = ['ENCARREGADO', 'DISCIPLINA', 'CHAPA', 'NOME', 'FUNÇÃO', 'TIPO MO', 'ÚLTIMO STATUS', 'DATA DO ÚLTIMO RDA', 'Nº DO ÚLTIMO RDA', 'OBSERVAÇÃO'];
+      var linha = function (p) { return [p.enc, p.disciplina, p.chapa, p.nome, p.funcao, p.mo, st(p), p.data ? br(p.data) : '', p.num, p.encRda && p.encRda !== p.enc ? 'Último RDA na equipe de ' + p.encRda : '']; };
+      var grupos = {}, ordem = [];
+      ps.forEach(function (p) { if (!grupos[p.enc]) { grupos[p.enc] = []; ordem.push(p.enc); } grupos[p.enc].push(p); });
+      var conta = {}; ps.forEach(function (p) { conta[st(p)] = (conta[st(p)] || 0) + 1; });
+      var sts = Object.keys(conta).sort(function (a, b) { return (a === SEM) - (b === SEM) || conta[b] - conta[a]; });
+      var res = [['ENCARREGADO', 'DISCIPLINA', 'TOTAL', 'MOD', 'MOI'].concat(sts)];
+      var tot = ['TOTAL', '', 0, 0, 0].concat(sts.map(function () { return 0; }));
+      ordem.forEach(function (e) {
+        var g = grupos[e], r = [e, (j.encarregados[e] || {}).disciplina || (g[0] || {}).disciplina || '', g.length,
+          g.filter(function (p) { return /MOD/i.test(p.mo); }).length, g.filter(function (p) { return /MOI/i.test(p.mo); }).length];
+        sts.forEach(function (s) { r.push(g.filter(function (p) { return st(p) === s; }).length || ''); });
+        r.forEach(function (v, i) { if (i >= 2) tot[i] += Number(v) || 0; });
+        res.push(r);
+      });
+      res.push(tot);
+      var sheets = [{ name: 'Geral', rows: [cab].concat(ps.map(linha)) }, { name: 'Resumo por status', rows: res }];
+      var usados = {};
+      ordem.forEach(function (e) {
+        var nm = String(e).replace(/[\[\]:*?\/\\]/g, ' ').trim().substr(0, 28) || 'Sem nome', k = nm, i = 2;
+        while (usados[k.toUpperCase()]) k = nm.substr(0, 26) + ' ' + i++;
+        usados[k.toUpperCase()] = 1;
+        var g = grupos[e], rows = [cab.slice(1)].concat(g.map(function (p) { return linha(p).slice(1); }));
+        rows.push([]); rows.push(['RESUMO', '', '', 'TOTAL', g.length]);
+        var c = {}; g.forEach(function (p) { c[st(p)] = (c[st(p)] || 0) + 1; });
+        Object.keys(c).sort(function (a, b) { return c[b] - c[a]; }).forEach(function (s) { rows.push(['', '', '', s, c[s]]); });
+        sheets.push({ name: k, rows: rows });
+      });
+      return window.makeXlsx(sheets).then(function (blob) { download(blob, 'Quadro de equipes - ultimo status ' + today() + '.xlsx'); done('Quadro de equipes pronto ✓ (' + ps.length + ' pessoas)'); });
+    }).catch(function (e) { done('Erro: ' + e.message); });
+  }
+
   function planilha() {
     busy('Montando planilha…');
     Promise.all([loadScript('jszip.min.js').then(function () { return loadScript('xlsxw.js'); }), api('admin_day', { de: A.de, ate: A.ate }, 120000), loadControle(A.de, A.ate)]).then(function (x) {
