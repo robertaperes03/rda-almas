@@ -71,8 +71,30 @@
       if (b.refs && !b.refs.same) { S.refs = b.refs; DB.put('kv', 'refs', b.refs); }
       delete b.refs;
       S.boot = b; S.online = true;
-      return DB.put('kv', 'boot', b).then(function () { return migraRenomes(b.renomes); }).then(function () { return applyLocalTeamOps(); }).then(function () { return true; });
+      return DB.put('kv', 'boot', b).then(function () { return migraRenomes(b.renomes); }).then(function () { return aplicaMovidos(b.movidos); }).then(function () { return applyLocalTeamOps(); }).then(function () { return true; });
     }).catch(function (e) { if (e.auth) { S.key = ''; DB.del('kv', 'key'); render(); } return false; });
+  }
+  // RDA que a administração mudou de data (ex.: enviado no dia 16 mas era do dia 13)
+  function aplicaMovidos(m) {
+    if (!m || !S.me || !Object.keys(m).length) return Promise.resolve();
+    var enc = S.me.nome, mudou = false;
+    return Object.keys(m).reduce(function (pr, velha) {
+      var info = m[velha], flag = 'mov:' + enc + '|' + velha;
+      return pr.then(function () { return DB.get('kv', flag); }).then(function (vis) {
+        if (vis === info.em) return;
+        return DB.get('drafts', enc + '|' + velha).then(function (d) {
+          if (!d || (d.state !== 'enviado' && (d.updatedAt || 0) > info.em)) return;
+          var troca = function (x) { return x === velha ? info.para : x; };
+          var nd = JSON.parse(JSON.stringify(d));
+          nd.date = info.para; nd.id = enc + '|' + info.para; nd.numero = info.num; nd.state = 'enviado';
+          (nd.atividades || []).forEach(function (a) { if (a.dataIni) a.dataIni = troca(a.dataIni); if (a.dataFim) a.dataFim = troca(a.dataFim); });
+          (nd.paralisacoes || []).forEach(function (a) { if (a.dataIni) a.dataIni = troca(a.dataIni); if (a.dataFim) a.dataFim = troca(a.dataFim); });
+          if (S.draft && (S.draft.id === d.id || S.draft.id === nd.id)) S.draft = null;
+          mudou = true;
+          return DB.put('drafts', nd.id, nd).then(function () { return DB.del('drafts', d.id); });
+        }).then(function () { return DB.put('kv', flag, info.em); });
+      });
+    }, Promise.resolve()).then(function () { if (mudou) setTimeout(function () { if (location.hash !== '#admin' && !S.draft) render(); }, 0); });
   }
   // encarregado que teve o nome trocado na administração: leva rascunhos, fila e login para o nome novo
   function migraRenomes(m) {
