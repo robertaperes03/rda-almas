@@ -1118,15 +1118,27 @@
     if (mx && fim > mx) fim = mx;
     return { ini: h.fim, fim: fim };
   }
+  // pessoas do pedido de HE: equipe + adicionados só no pedido, sem repetir chapa nem nome
+  function heLista(h, team) {
+    var vis = {}, out = [];
+    team.concat((h && h.extras || []).map(function (x) { return Object.assign({}, x, { extra: true }); })).forEach(function (p) {
+      var k1 = String(p.chapa || ''), k2 = 'N:' + norm(p.nome);
+      if ((k1 && vis[k1]) || vis[k2]) return;
+      if (k1) vis[k1] = 1; vis[k2] = 1; out.push(p);
+    });
+    return out;
+  }
+  function curtoDe(nome) { var e = (S.boot.encarregados || []).filter(function (x) { return x.nome === nome; })[0]; return e ? (e.curto || e.nome) : (nome || 'sem equipe'); }
   function renderHeForm() {
     if (!S.he) {
       var dd = today(); if (nowStr() > dd + ' ' + (cfg().HE_PRAZO || '13:00')) dd = addDays(dd, 1);
       var tp = heTipo(dd), df = heDefaults(dd, tp);
       S.he = { id: 'HE-' + uid(), enc: S.me.nome, curto: S.me.curto, disciplina: S.me.disciplina, supervisor: S.me.supervisor, date: dd, tipo: tp, ini: df.ini, fim: df.fim, turno: 'DIURNO', area: '', motivo: '', sel: {}, declaro: false, assinatura: '', state: 'rascunho' };
     }
-    var h = S.he, team = myTeam(), prazo = hePrazo(h.date, h.tipo), noPrazo = nowStr() <= prazo || h.state === 'enviado';
+    var h = S.he, team = heLista(S.he, myTeam()), prazo = hePrazo(h.date, h.tipo), noPrazo = nowStr() <= prazo || h.state === 'enviado';
     h.sel = h.sel || {}; if (h.pessoas && !Object.keys(h.sel).length) h.pessoas.forEach(function (x) { h.sel[x.chapa] = true; });
-    var nsel = Object.keys(h.sel).filter(function (k) { return h.sel[k]; }).length;
+    if (h.pessoas && !h.extras) { var noTime = {}; team.forEach(function (p) { noTime[p.chapa] = 1; }); h.extras = h.pessoas.filter(function (x) { return !noTime[x.chapa]; }); if (h.extras.length) team = heLista(h, myTeam()); }
+    var nsel = team.filter(function (p) { return h.sel[p.chapa]; }).length;
     var html = '<div class="rdahead"><div class="num">PEDIDO DE HORA EXTRA</div><div class="who">' + (h.tipo === 'ESCALA' ? 'Escala – dia não útil' : 'Extensão de horário') + '</div><div class="meta">Prazo para pedir: até ' + br(prazo.slice(0, 10)) + ' às ' + prazo.slice(11) + '</div>' +
       (h.state === 'enviado' ? '<div style="margin-top:8px">' + heBadge(h) + '</div>' : '') + '</div>';
     if (!noPrazo) html += '<div class="alert bad"><b>Fora do prazo.</b> ' + (cfg().HE_FORA_PRAZO === 'BLOQUEAR' ? 'Não é possível enviar este pedido.' : 'Você pode enviar, mas o pedido vai marcado como FORA DO PRAZO para aprovação.') + '</div>';
@@ -1135,7 +1147,8 @@
       (h.tipo === 'EXTENSÃO' ? '<p class="small muted">' + (dow(h.date) === 5 ? 'Sexta-feira' : 'Segunda a quinta') + ': extensão até no máximo ' + esc(heMax(h.date)) + '.</p>' : '') +
       '<label class="f">Área</label><input id="harea" value="' + esc(h.area) + '"><label class="f">Atividade que será realizada <b style="color:var(--bad)">*</b></label><textarea id="hmot" placeholder="Descreva a atividade que será feita nas horas extras">' + esc(h.motivo) + '</textarea></div>';
     html += '<div class="card"><div class="card-h"><h2 id="hqt">Quem vai ficar (' + nsel + ')</h2><button class="btn sm ghost" id="hall">Marcar todos</button></div>' +
-      team.map(function (p) { var on = !!h.sel[p.chapa]; return '<label class="person" style="cursor:pointer"><input type="checkbox" data-hs="' + esc(p.chapa) + '"' + (on ? ' checked' : '') + ' style="width:30px;height:30px;min-height:0;flex:0 0 30px"><div class="pinfo"><b>' + esc(p.nome) + '</b><small>' + esc(p.chapa) + ' · ' + esc(p.funcao) + '</small></div></label>'; }).join('') + '</div>';
+      team.map(function (p) { var on = !!h.sel[p.chapa]; return '<label class="person" style="cursor:pointer"><input type="checkbox" data-hs="' + esc(p.chapa) + '"' + (on ? ' checked' : '') + ' style="width:30px;height:30px;min-height:0;flex:0 0 30px"><div class="pinfo"><b>' + esc(p.nome) + '</b><small>' + esc(p.chapa) + ' · ' + esc(p.funcao) + (p.extra ? ' · <b style="color:var(--orange)">adicionado' + (p.de && p.de !== S.me.nome ? ' (equipe de ' + esc(curtoDe(p.de)) + ')' : '') + '</b>' : '') + '</small></div>' + (p.extra ? '<button class="btn sm ghost" data-hx="' + esc(p.chapa) + '" title="Tirar do pedido">✕</button>' : '') + '</label>'; }).join('') +
+      '<button class="btn ghost block" id="hadd" style="margin-top:8px">＋ Adicionar pessoa ao pedido</button><p class="small muted" style="margin:6px 0 0">Quem for adicionado aqui entra só neste pedido de hora extra. A equipe do RDA não muda.</p></div>';
     html += '<div class="card"><div class="card-h"><h2>Confirmação</h2></div><label class="chk" style="align-items:flex-start"><input type="checkbox" id="hdecl"' + (h.declaro ? ' checked' : '') + '> <span>Declaro que combinei a hora extra com cada pessoa marcada e que todas concordaram.</span></label>' +
       '<div class="sigbox" id="hsig" style="margin-top:10px">' + (h.assinatura ? '<img id="hsigimg" alt="">' : '<span class="muted">✍️ Assinatura do encarregado</span>') + '</div></div>';
     html += '<div class="bottombar"><button class="btn ghost" id="hback">‹ Voltar</button><button class="btn orange" id="hsend"' + (!noPrazo && cfg().HE_FORA_PRAZO === 'BLOQUEAR' ? ' disabled' : '') + '>📤 Enviar pedido</button></div>';
@@ -1155,6 +1168,28 @@
     document.getElementById('hmot').oninput = function () { h.motivo = this.value; keep(); };
     [].forEach.call(document.querySelectorAll('[data-hs]'), function (c) { c.onchange = function () { h.sel[c.dataset.hs] = c.checked; keep(); var n = Object.keys(h.sel).filter(function (k) { return h.sel[k]; }).length; var t = document.getElementById('hqt'); if (t) t.textContent = 'Quem vai ficar (' + n + ')'; }; });
     document.getElementById('hall').onclick = function () { team.forEach(function (p) { h.sel[p.chapa] = true; }); keep(); renderHeForm(); };
+    [].forEach.call(document.querySelectorAll('[data-hx]'), function (b) { b.onclick = function (ev) { ev.preventDefault(); ev.stopPropagation(); h.extras = (h.extras || []).filter(function (x) { return x.chapa !== b.dataset.hx; }); delete h.sel[b.dataset.hx]; keep(); renderHeForm(); }; });
+    document.getElementById('hadd').onclick = function () {
+      var ja = {}; team.forEach(function (p) { ja[p.chapa] = 1; ja['N:' + norm(p.nome)] = 1; });
+      var todos = S.boot.efetivo.slice().sort(function (a, b) { return a.nome.localeCompare(b.nome); });
+      var b = sheet('<h3>Adicionar pessoa ao pedido</h3><div class="search"><input id="hq" placeholder="Procure por nome, chapa ou função"></div><div class="namelist" id="hql" style="max-height:55vh;overflow:auto"></div>');
+      var draw = function (f) {
+        var nf = norm(f), lst = todos.filter(function (p) { return !nf || norm(p.nome + ' ' + p.chapa + ' ' + p.funcao).indexOf(nf) >= 0; }).slice(0, 80);
+        b.querySelector('#hql').innerHTML = lst.length ? lst.map(function (p) {
+          var dup = ja[p.chapa] || ja['N:' + norm(p.nome)];
+          return '<button data-hp="' + esc(p.chapa) + '"' + (dup ? ' disabled style="opacity:.45"' : '') + '><span><b>' + esc(p.nome) + '</b><small>' + esc(p.chapa) + ' · ' + esc(p.funcao) + ' · ' + esc(p.enc === S.me.nome ? 'minha equipe' : curtoDe(p.enc)) + (dup ? ' · já está no pedido' : '') + '</small></span></button>';
+        }).join('') : '<p class="empty">Ninguém encontrado</p>';
+        [].forEach.call(b.querySelectorAll('[data-hp]:not([disabled])'), function (x) {
+          x.onclick = function () {
+            var p = todos.filter(function (q) { return q.chapa === x.dataset.hp; })[0]; if (!p || ja[p.chapa] || ja['N:' + norm(p.nome)]) return;
+            h.extras = (h.extras || []).concat([{ chapa: p.chapa, nome: p.nome, funcao: p.funcao, mo: p.mo || '', de: p.enc }]);
+            h.sel[p.chapa] = true; keep(); closeSheet(); renderHeForm(); toast(p.nome + ' adicionado ao pedido');
+          };
+        });
+      };
+      b.querySelector('#hq').oninput = function () { draw(this.value); };
+      draw(''); setTimeout(function () { var i = b.querySelector('#hq'); if (i) i.focus(); }, 100);
+    };
     document.getElementById('hdecl').onchange = function () { h.declaro = this.checked; keep(); };
     document.getElementById('hsig').onclick = function () { sigPad(function (u) { var id = 'sig_' + uid(); return DB.put('photos', id, { data: u, takenAt: fmtDT(new Date()), rda: h.id }).then(function () { h.assinatura = id; keep(); closeSheet(); renderHeForm(); }); }); };
     if (h.assinatura) DB.get('photos', h.assinatura).then(function (p) { var i = document.getElementById('hsigimg'); if (p && i) i.src = p.data; });
@@ -1171,7 +1206,7 @@
       if (!np && cfg().HE_FORA_PRAZO === 'BLOQUEAR') return toast('Fora do prazo');
       if (!np && !confirm('Este pedido está FORA DO PRAZO. Enviar mesmo assim?')) return;
       h.pessoas = ps.map(function (p) { return { chapa: p.chapa, nome: p.nome, funcao: p.funcao, mo: p.mo || '' }; });
-      h.equipe = team.map(function (p) { return { chapa: p.chapa, nome: p.nome, funcao: p.funcao }; });
+      h.equipe = team.filter(function (p) { return !p.extra; }).map(function (p) { return { chapa: p.chapa, nome: p.nome, funcao: p.funcao }; });
       h.pedidoEm = h.pedidoEm && h.state !== 'rascunho' ? h.pedidoEm : nowStr(); h.prazo = prazo; h.noPrazo = h.pedidoEm <= prazo;
       h.confirmacao = 'Declaração do encarregado'; h.state = 'fila';
       heSaveLocal(h).then(function () { return enqueue({ type: 'he', heId: h.id }); }).then(function () {
