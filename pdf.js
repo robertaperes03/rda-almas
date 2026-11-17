@@ -269,7 +269,9 @@
     p.cell('FUNÇÃO', x, p.y, widths[5], hh * 2, { bold: true, fill: GRAY }); p.cell('CONFIRMAÇÃO', x + widths[5], p.y, widths[6], hh * 2, { bold: true, fill: GRAY });
     p.y += hh * 2;
     var sel = {}; (h.pessoas || []).forEach(function (x) { sel[x.chapa] = 1; });
-    var lista = (h.equipe && h.equipe.length ? h.equipe : h.pessoas || []);
+    var lista = (h.equipe && h.equipe.length ? h.equipe : h.pessoas || []).slice();
+    var naLista = {}; lista.forEach(function (x) { naLista[x.chapa] = 1; });
+    (h.pessoas || []).forEach(function (x) { if (!naLista[x.chapa]) { naLista[x.chapa] = 1; lista.push(Object.assign({}, x, { funcao: (x.funcao || '') + ' (adicionado)' })); } });
     var n = Math.max(lista.length, 20);
     for (var i = 0; i < n; i++) {
       var t = lista[i] || {}, on = t.chapa && sel[t.chapa];
