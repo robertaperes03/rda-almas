@@ -122,14 +122,14 @@
     var el = document.getElementById('adm');
     if (A.user.legado) {
       el.innerHTML = '<div class="card"><div class="card-h"><h2>Crie o seu usuário mestre</h2></div><p class="small muted" style="margin-top:0">O usuário mestre vê tudo e é o único que cria, edita e exclui os usuários do ADM. Depois de criado, a senha antiga para de funcionar e cada pessoa entra com o próprio usuário.</p>' +
-        '<label class="f">Seu nome</label><input id="unome"><label class="f">Usuário (para entrar)</label><input id="ulogin" autocapitalize="none" spellcheck="false" placeholder="ex.: roberta"><label class="f">Senha (mínimo 6 caracteres)</label><input type="password" id="us1" autocomplete="new-password"><label class="f">Repita a senha</label><input type="password" id="us2" autocomplete="new-password">' +
+        '<label class="f">Seu nome</label><input id="unome"><label class="f">Usuário (para entrar)</label><input id="ulogin" autocapitalize="none" spellcheck="false" placeholder="ex.: roberta"><label class="f">E-mail para receber o resumo <span class="muted">(opcional)</span></label><input type="email" id="uemail" autocapitalize="none" spellcheck="false"><label class="f">Senha (mínimo 6 caracteres)</label><input type="password" id="us1" autocomplete="new-password"><label class="f">Repita a senha</label><input type="password" id="us2" autocomplete="new-password">' +
         '<div class="alert hidden" id="ux"></div><button class="btn big" id="usok" style="margin-top:12px">Criar usuário mestre</button></div>';
       document.getElementById('usok').onclick = function () {
         var x = document.getElementById('ux'), s1 = document.getElementById('us1').value, s2 = document.getElementById('us2').value;
         var err = function (m) { x.classList.remove('hidden'); x.textContent = m; };
         if (s1 !== s2) return err('As senhas não são iguais');
         var bt = this; bt.disabled = true;
-        api('admin_userSave', { u: { nome: document.getElementById('unome').value, login: document.getElementById('ulogin').value }, senha: s1 }).then(function () {
+        api('admin_userSave', { u: { nome: document.getElementById('unome').value, login: document.getElementById('ulogin').value, email: document.getElementById('uemail').value }, senha: s1 }).then(function () {
           done('Usuário mestre criado ✓ Entre com ele agora.'); sair();
         }).catch(function (e) { bt.disabled = false; err(e.message); });
       };
@@ -141,7 +141,7 @@
       el.innerHTML = '<div class="card"><div class="card-h"><h2>Usuários do ADM</h2><button class="btn sm" id="unovo">＋ Novo usuário</button></div><p class="small muted" style="margin-top:0">Cada pessoa entra com o próprio usuário e só vê as abas liberadas. Só você (mestre) vê esta tela.</p>' +
         j.users.map(function (u) {
           return '<div class="rdaline" data-u="' + esc(u.login) + '" style="cursor:pointer"><div class="tx"><b>' + esc(u.nome) + (u.mestre ? ' <span class="tag">Mestre</span>' : '') + (u.ativo ? '' : ' <span class="tag" style="background:#fdecea;color:#b71c1c">Inativo</span>') + '</b><small>' + esc(u.login) + ' · ' +
-            (u.mestre ? 'todas as abas' : (u.abas.length ? u.abas.map(function (a) { return NOME_ABA[a] || a; }).join(', ') : 'nenhuma aba')) + (u.ultimo ? ' · último acesso ' + br(u.ultimo.slice(0, 10)) + ' ' + u.ultimo.slice(11, 16) : '') + '</small></div><span class="go">›</span></div>';
+            (u.mestre ? 'todas as abas' : (u.abas.length ? u.abas.map(function (a) { return NOME_ABA[a] || a; }).join(', ') : 'nenhuma aba')) + (u.email ? ' · ✉️ ' + esc(u.email) : ' · sem e-mail') + (u.ultimo ? ' · último acesso ' + br(u.ultimo.slice(0, 10)) + ' ' + u.ultimo.slice(11, 16) : '') + '</small></div><span class="go">›</span></div>';
         }).join('') + '</div>';
       document.getElementById('unovo').onclick = function () { userForm(null); };
       [].forEach.call(el.querySelectorAll('[data-u]'), function (d) { d.onclick = function () { userForm(A.usrs.filter(function (u) { return u.login === d.dataset.u; })[0]); }; });
@@ -151,6 +151,7 @@
     var novo = !u; u = u || { login: '', nome: '', abas: [], ativo: true, mestre: false };
     var b = sheetUI('<h3>' + (novo ? 'Novo usuário' : 'Editar usuário') + '</h3>' +
       '<label class="f">Nome</label><input id="fn" value="' + esc(u.nome) + '"><label class="f">Usuário (para entrar)</label><input id="fl" autocapitalize="none" spellcheck="false" value="' + esc(u.login) + '" placeholder="ex.: jose.erivan">' +
+      '<label class="f">E-mail para notificações <span class="muted">(opcional)</span></label><input type="email" id="fe" autocapitalize="none" spellcheck="false" value="' + esc(u.email || '') + '"><p class="small muted" style="margin:4px 0 0">Recebe de hora em hora, quando houver novidade, o resumo só dos assuntos das abas liberadas.</p>' +
       '<label class="f">' + (novo ? 'Senha (mínimo 6 caracteres)' : 'Nova senha <span class="muted">(deixe em branco para manter)</span>') + '</label><input type="password" id="fs" autocomplete="new-password">' +
       (u.mestre ? '<p class="small muted">Usuário mestre: vê todas as abas e não pode ser desativado nem excluído.</p>' :
         '<label class="f">Abas liberadas</label>' + ABAS.map(function (x) { return '<label class="chk" style="margin:4px 0"><input type="checkbox" data-ab="' + x[0] + '"' + (u.abas.indexOf(x[0]) >= 0 ? ' checked' : '') + '> ' + x[1] + '</label>'; }).join('') +
@@ -165,7 +166,7 @@
       var fa = b.querySelector('#fa');
       if (!u.mestre && !abas.length) return err('Marque pelo menos uma aba');
       bt.disabled = true;
-      api('admin_userSave', { orig: novo ? '' : u.login, u: { nome: b.querySelector('#fn').value, login: b.querySelector('#fl').value, abas: abas, ativo: fa ? fa.checked : true }, senha: b.querySelector('#fs').value }).then(function (r) {
+      api('admin_userSave', { orig: novo ? '' : u.login, u: { nome: b.querySelector('#fn').value, login: b.querySelector('#fl').value, email: b.querySelector('#fe').value, abas: abas, ativo: fa ? fa.checked : true }, senha: b.querySelector('#fs').value }).then(function (r) {
         if (u.mestre && r.login !== A.user.login) { A.user.login = r.login; lsSet('rda_admin_user', JSON.stringify(A.user)); }
         closeUI(); done('Usuário salvo ✓'); usuarios();
       }).catch(function (e) { bt.disabled = false; err(e.message); });
