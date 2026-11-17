@@ -2,7 +2,9 @@
 (function () {
   'use strict';
   var U = function () { return window.RDA_UTIL; };
-  var A = { pass: sessionStorage.getItem('rda_admin') || '', tab: 'entregas', date: null, dias: 7, todos: false, de: null, ate: null, list: null };
+  var lsGet = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  var lsSet = function (k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { } };
+  var A = { pass: lsGet('rda_admin_tok') || '', user: (function () { try { return JSON.parse(lsGet('rda_admin_user') || 'null'); } catch (e) { return null; } })(), tab: 'entregas', date: null, dias: 7, todos: false, de: null, ate: null, list: null };
   var DIAS = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
   var DIAS_EXT = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
   var ABREV = { 'SEM ESCALA': 'S/E', 'DOMINGO / DSR': 'DSR', 'FERIADO': 'FER', 'FOLGA DE CAMPO': 'F.C', 'SEM ATIVIDADE': 'S/A', 'PARALISAÇÃO': 'PAR', 'PARALISAÇÃO CLIMÁTICA': 'CHU', 'AGUARDANDO LIBERAÇÃO': 'AG.L', 'FOLGA': 'FOL', 'FÉRIAS': 'FÉR', 'ATESTADO / MÉDICO': 'ATE', 'FALTA JUSTIFICADA': 'F.J', 'NÃO TEM RDA': 'N/T', 'ENTREGUE EM PAPEL': 'PAP' };
@@ -13,7 +15,19 @@
   function diff(a, b) { return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000); }
   function esc(s) { return U().esc(s); }
   function br(s) { return U().br(s); }
-  function api(action, data, t) { return window.RDA_API(action, Object.assign({ admin: A.pass }, data || {}), t); }
+  function api(action, data, t) {
+    return window.RDA_API(action, Object.assign({ admin: A.pass }, data || {}), t).catch(function (e) {
+      if (e.auth && A.pass && action !== 'admin_login') { sair(true); done(e.message); }
+      throw e;
+    });
+  }
+  function sair(semServidor) {
+    if (A.pass && !semServidor) window.RDA_API('admin_logout', { admin: A.pass }).catch(function () { });
+    A.pass = ''; A.user = null; lsSet('rda_admin_tok', null); lsSet('rda_admin_user', null); A.tab = 'entregas';
+    if ($root) render();
+  }
+  var ABAS = [['entregas', '📊 Recebimento'], ['exportar', '📄 RDAs e exportação'], ['importar', '⬆️ Importar'], ['he', '⏱ Horas extras'], ['avisos', '🔔 Avisos'], ['msg', '✉️ Mensagens'], ['folgas', '🏖 Folgas'], ['feriados', '📅 Feriados'], ['cadastro', '🗂 Cadastro base']];
+  function podeAba(t) { var u = A.user; return !!u && (u.mestre || (u.abas || []).indexOf(t) >= 0); }
   function loadScript(src) {
     return new Promise(function (res, rej) {
       if (document.querySelector('script[src="' + src + '"]')) return res();
@@ -69,27 +83,110 @@
   function render(root) {
     $root = root || $root;
     document.getElementById('topsub').textContent = 'Administração';
-    if (!A.pass) return login();
+    if (!A.pass || !A.user) return login();
     A.date = A.date || today(); A.de = A.de || today(); A.ate = A.ate || today();
-    $root.innerHTML = '<div class="tabs"><button data-t="entregas">📊 Recebimento</button><button data-t="exportar">📄 RDAs e exportação</button><button data-t="importar">⬆️ Importar</button><button data-t="he">⏱ Horas extras</button><button data-t="avisos">🔔 Avisos</button><button data-t="msg">✉️ Mensagens</button><button data-t="folgas">🏖 Folgas</button><button data-t="feriados">📅 Feriados</button><button data-t="cadastro">🗂 Cadastro base</button><button data-t="ajuda">❓</button><button data-t="sair">Sair</button></div><div id="adm"></div>';
+    var minhas = ABAS.filter(function (x) { return podeAba(x[0]); });
+    if (A.user.legado) minhas = [];
+    var extra = A.user.mestre ? [['usuarios', '👤 Usuários']] : [['conta', '🔑 Minha senha']];
+    if (!minhas.concat(extra).some(function (x) { return x[0] === A.tab; })) A.tab = (minhas[0] || extra[0])[0];
+    $root.innerHTML = '<div class="tabs">' + minhas.concat(extra).map(function (x) { return '<button data-t="' + x[0] + '">' + x[1] + '</button>'; }).join('') + (minhas.length ? '<button data-t="ajuda">❓</button>' : '') + '<button data-t="sair">Sair</button></div>' +
+      '<p class="small muted" style="margin:-4px 0 8px">Conectado como <b>' + esc(A.user.legado ? 'acesso antigo (senha única)' : A.user.nome + ' (' + A.user.login + ')') + '</b></p><div id="adm"></div>';
     [].forEach.call($root.querySelectorAll('.tabs button'), function (b) {
       b.classList.toggle('sel', b.dataset.t === A.tab);
-      b.onclick = function () { if (b.dataset.t === 'sair') { A.pass = ''; sessionStorage.removeItem('rda_admin'); location.hash = ''; return; } A.tab = b.dataset.t; render(); };
+      b.onclick = function () { if (b.dataset.t === 'sair') { sair(); return; } A.tab = b.dataset.t; render(); };
     });
     if (A.tab === 'ajuda') { A.tab = 'entregas'; tourAdmin(true); }
-    if (A.tab === 'entregas') entregas(); else if (A.tab === 'exportar') exportar(); else if (A.tab === 'feriados') feriados(); else if (A.tab === 'he') horasExtras(); else if (A.tab === 'avisos') avisos(); else if (A.tab === 'msg') mensagens(); else if (A.tab === 'folgas') folgas(); else if (A.tab === 'cadastro') cadastro(); else importar();
+    if (A.tab === 'usuarios') usuarios(); else if (A.tab === 'conta') minhaConta(); else if (A.tab === 'entregas') entregas(); else if (A.tab === 'exportar') exportar(); else if (A.tab === 'feriados') feriados(); else if (A.tab === 'he') horasExtras(); else if (A.tab === 'avisos') avisos(); else if (A.tab === 'msg') mensagens(); else if (A.tab === 'folgas') folgas(); else if (A.tab === 'cadastro') cadastro(); else importar();
   }
 
   function login() {
-    $root.innerHTML = '<h1>Administração</h1><div class="card"><label class="f">Senha</label><input type="password" id="pw"><button class="btn big" style="margin-top:12px" id="go">Entrar</button></div>';
+    $root.innerHTML = '<h1>Administração</h1><div class="card"><label class="f">Usuário</label><input id="lg" autocapitalize="none" autocomplete="username" spellcheck="false"><label class="f">Senha</label><input type="password" id="pw" autocomplete="current-password"><button class="btn big" style="margin-top:12px" id="go">Entrar</button><p class="small muted hidden" id="lgdica" style="margin-bottom:0">Primeiro acesso: deixe o <b>usuário em branco</b> e use a senha antiga da administração para criar o seu usuário mestre.</p></div>';
+    window.RDA_API('adminTemMestre', {}).then(function (r) { if (!r.mestre) document.getElementById('lgdica').classList.remove('hidden'); }).catch(function () { });
     var go = function () {
-      var pw = document.getElementById('pw').value; if (!pw) return;
-      A.pass = pw; busy('Verificando…');
-      api('admin_login').then(function (r) { sessionStorage.setItem('rda_admin', pw); if (r.vapid) sessionStorage.setItem('rda_vapid', r.vapid); done('Bem-vinda!'); render(); setTimeout(function () { tourAdmin(); }, 500); })
-        .catch(function (e) { A.pass = ''; done(e.message); });
+      var lg = document.getElementById('lg').value.trim(), pw = document.getElementById('pw').value; if (!pw) return;
+      busy('Verificando…');
+      window.RDA_API('admin_login', { login: lg, senha: pw }).then(function (r) {
+        A.pass = r.token; A.user = r.user; lsSet('rda_admin_tok', r.token); lsSet('rda_admin_user', JSON.stringify(r.user));
+        if (r.vapid) sessionStorage.setItem('rda_vapid', r.vapid);
+        done(r.user.legado ? 'Crie agora o seu usuário mestre' : 'Bem-vindo(a), ' + r.user.nome.split(' ')[0] + '!');
+        A.tab = r.user.legado ? 'usuarios' : 'entregas'; render(); if (!r.user.legado) setTimeout(function () { tourAdmin(); }, 500);
+      }).catch(function (e) { done(e.message); });
     };
     document.getElementById('go').onclick = go;
     document.getElementById('pw').onkeydown = function (e) { if (e.key === 'Enter') go(); };
+  }
+
+  /* ---------- usuários do ADM (só o mestre vê) ---------- */
+  var NOME_ABA = {}; ABAS.forEach(function (x) { NOME_ABA[x[0]] = x[1]; });
+  function usuarios() {
+    var el = document.getElementById('adm');
+    if (A.user.legado) {
+      el.innerHTML = '<div class="card"><div class="card-h"><h2>Crie o seu usuário mestre</h2></div><p class="small muted" style="margin-top:0">O usuário mestre vê tudo e é o único que cria, edita e exclui os usuários do ADM. Depois de criado, a senha antiga para de funcionar e cada pessoa entra com o próprio usuário.</p>' +
+        '<label class="f">Seu nome</label><input id="unome"><label class="f">Usuário (para entrar)</label><input id="ulogin" autocapitalize="none" spellcheck="false" placeholder="ex.: roberta"><label class="f">Senha (mínimo 6 caracteres)</label><input type="password" id="us1" autocomplete="new-password"><label class="f">Repita a senha</label><input type="password" id="us2" autocomplete="new-password">' +
+        '<div class="alert hidden" id="ux"></div><button class="btn big" id="usok" style="margin-top:12px">Criar usuário mestre</button></div>';
+      document.getElementById('usok').onclick = function () {
+        var x = document.getElementById('ux'), s1 = document.getElementById('us1').value, s2 = document.getElementById('us2').value;
+        var err = function (m) { x.classList.remove('hidden'); x.textContent = m; };
+        if (s1 !== s2) return err('As senhas não são iguais');
+        var bt = this; bt.disabled = true;
+        api('admin_userSave', { u: { nome: document.getElementById('unome').value, login: document.getElementById('ulogin').value }, senha: s1 }).then(function () {
+          done('Usuário mestre criado ✓ Entre com ele agora.'); sair();
+        }).catch(function (e) { bt.disabled = false; err(e.message); });
+      };
+      return;
+    }
+    el.innerHTML = '<div class="card"><p class="empty">Carregando…</p></div>';
+    api('admin_users', {}).then(function (j) {
+      A.usrs = j.users;
+      el.innerHTML = '<div class="card"><div class="card-h"><h2>Usuários do ADM</h2><button class="btn sm" id="unovo">＋ Novo usuário</button></div><p class="small muted" style="margin-top:0">Cada pessoa entra com o próprio usuário e só vê as abas liberadas. Só você (mestre) vê esta tela.</p>' +
+        j.users.map(function (u) {
+          return '<div class="rdaline" data-u="' + esc(u.login) + '" style="cursor:pointer"><div class="tx"><b>' + esc(u.nome) + (u.mestre ? ' <span class="tag">Mestre</span>' : '') + (u.ativo ? '' : ' <span class="tag" style="background:#fdecea;color:#b71c1c">Inativo</span>') + '</b><small>' + esc(u.login) + ' · ' +
+            (u.mestre ? 'todas as abas' : (u.abas.length ? u.abas.map(function (a) { return NOME_ABA[a] || a; }).join(', ') : 'nenhuma aba')) + (u.ultimo ? ' · último acesso ' + br(u.ultimo.slice(0, 10)) + ' ' + u.ultimo.slice(11, 16) : '') + '</small></div><span class="go">›</span></div>';
+        }).join('') + '</div>';
+      document.getElementById('unovo').onclick = function () { userForm(null); };
+      [].forEach.call(el.querySelectorAll('[data-u]'), function (d) { d.onclick = function () { userForm(A.usrs.filter(function (u) { return u.login === d.dataset.u; })[0]); }; });
+    }).catch(function (e) { el.innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
+  }
+  function userForm(u) {
+    var novo = !u; u = u || { login: '', nome: '', abas: [], ativo: true, mestre: false };
+    var b = sheetUI('<h3>' + (novo ? 'Novo usuário' : 'Editar usuário') + '</h3>' +
+      '<label class="f">Nome</label><input id="fn" value="' + esc(u.nome) + '"><label class="f">Usuário (para entrar)</label><input id="fl" autocapitalize="none" spellcheck="false" value="' + esc(u.login) + '" placeholder="ex.: jose.erivan">' +
+      '<label class="f">' + (novo ? 'Senha (mínimo 6 caracteres)' : 'Nova senha <span class="muted">(deixe em branco para manter)</span>') + '</label><input type="password" id="fs" autocomplete="new-password">' +
+      (u.mestre ? '<p class="small muted">Usuário mestre: vê todas as abas e não pode ser desativado nem excluído.</p>' :
+        '<label class="f">Abas liberadas</label>' + ABAS.map(function (x) { return '<label class="chk" style="margin:4px 0"><input type="checkbox" data-ab="' + x[0] + '"' + (u.abas.indexOf(x[0]) >= 0 ? ' checked' : '') + '> ' + x[1] + '</label>'; }).join('') +
+        '<label class="chk" style="margin-top:10px"><input type="checkbox" id="fa"' + (u.ativo ? ' checked' : '') + '> <b>Ativo</b> (desmarque para bloquear o acesso sem excluir)</label>') +
+      '<div class="alert hidden" id="fx"></div><button class="btn block" id="fok" style="margin-top:12px">Salvar</button>' +
+      (novo || u.mestre ? '' : '<button class="btn block danger" id="fdel" style="margin-top:8px">Excluir usuário</button>') +
+      '<button class="btn block ghost" id="fno" style="margin-top:8px">Cancelar</button>');
+    var x = b.querySelector('#fx'), err = function (m) { x.classList.remove('hidden'); x.textContent = m; };
+    b.querySelector('#fno').onclick = closeUI;
+    b.querySelector('#fok').onclick = function () {
+      var bt = this, abas = [].filter.call(b.querySelectorAll('[data-ab]'), function (c) { return c.checked; }).map(function (c) { return c.dataset.ab; });
+      var fa = b.querySelector('#fa');
+      if (!u.mestre && !abas.length) return err('Marque pelo menos uma aba');
+      bt.disabled = true;
+      api('admin_userSave', { orig: novo ? '' : u.login, u: { nome: b.querySelector('#fn').value, login: b.querySelector('#fl').value, abas: abas, ativo: fa ? fa.checked : true }, senha: b.querySelector('#fs').value }).then(function (r) {
+        if (u.mestre && r.login !== A.user.login) { A.user.login = r.login; lsSet('rda_admin_user', JSON.stringify(A.user)); }
+        closeUI(); done('Usuário salvo ✓'); usuarios();
+      }).catch(function (e) { bt.disabled = false; err(e.message); });
+    };
+    var del = b.querySelector('#fdel');
+    if (del) del.onclick = function () {
+      if (del.dataset.conf !== '1') { del.dataset.conf = '1'; del.textContent = 'Toque de novo para confirmar'; return; }
+      del.disabled = true;
+      api('admin_userDel', { login: u.login }).then(function () { closeUI(); done('Usuário excluído'); usuarios(); }).catch(function (e) { del.disabled = false; err(e.message); });
+    };
+  }
+  function minhaConta() {
+    var el = document.getElementById('adm');
+    el.innerHTML = '<div class="card"><div class="card-h"><h2>Trocar minha senha</h2></div><label class="f">Senha atual</label><input type="password" id="ma" autocomplete="current-password"><label class="f">Nova senha (mínimo 6 caracteres)</label><input type="password" id="mn1" autocomplete="new-password"><label class="f">Repita a nova senha</label><input type="password" id="mn2" autocomplete="new-password"><div class="alert hidden" id="mx"></div><button class="btn block" id="mok" style="margin-top:12px">Trocar senha</button></div>';
+    document.getElementById('mok').onclick = function () {
+      var x = document.getElementById('mx'), n1 = document.getElementById('mn1').value;
+      if (n1 !== document.getElementById('mn2').value) { x.classList.remove('hidden'); x.textContent = 'As senhas novas não são iguais'; return; }
+      var bt = this; bt.disabled = true;
+      api('admin_myPass', { atual: document.getElementById('ma').value, nova: n1 }).then(function () { done('Senha trocada ✓'); minhaConta(); })
+        .catch(function (e) { bt.disabled = false; x.classList.remove('hidden'); x.textContent = e.message; });
+    };
   }
 
   /* ---------- Recebimento ---------- */
@@ -136,7 +233,7 @@
       document.getElementById('ent').innerHTML = h;
       [].forEach.call(document.querySelectorAll('td.ok'), function (td) { td.onclick = function () { pdfOne(td.dataset.id); }; });
       [].forEach.call(document.querySelectorAll('[data-sit]'), function (td) { td.onclick = function () { var k = td.dataset.sit.split('|'); situacao(j, k[0], k[1]); }; });
-    }).catch(function (e) { document.getElementById('ent').innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; if (e.auth) { A.pass = ''; render(); } });
+    }).catch(function (e) { document.getElementById('ent').innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
   }
   function situacao(j, enc, d) {
     var e = j.encarregados.filter(function (x) { return x.nome === enc; })[0];
@@ -514,6 +611,25 @@
   }
 
   /* ---------- Horas extras: aprovação e documentos ---------- */
+  // lista nominal de hora extra em Excel (uma linha por pessoa)
+  function heXlsx(pedidos, arquivo, aba) {
+    busy('Montando planilha…');
+    loadScript('jszip.min.js').then(function () { return loadScript('xlsxw.js'); }).then(function () {
+      var ps = pedidos.slice().sort(function (a, b) { return (a.date + (a.disciplina || '') + a.enc).localeCompare(b.date + (b.disciplina || '') + b.enc); });
+      var rows = [['ITEM', 'DATA', 'TIPO', 'CHAPA', 'NOME', 'FUNÇÃO', 'TIPO MO', 'ENCARREGADO (LÍDER)', 'DISCIPLINA', 'INÍCIO', 'TÉRMINO', 'ÁREA', 'ATIVIDADE', 'EQUIPE', 'STATUS', 'PEDIDO NO PRAZO', 'OBS. DA ADMINISTRAÇÃO', 'ID DO PEDIDO']], i = 0, res = {};
+      ps.forEach(function (h) {
+        var daEquipe = {}; (h.equipe || []).forEach(function (x) { daEquipe[x.chapa] = 1; });
+        (h.pessoas || []).forEach(function (x) {
+          i++; res[h.status || 'PENDENTE'] = (res[h.status || 'PENDENTE'] || 0) + 1;
+          rows.push([i, br(h.date), h.tipo || '', x.chapa, x.nome, x.funcao || '', x.mo || '', h.curto || h.enc, h.disciplina || '', x.ini || h.ini || '', x.fim || h.fim || '', h.area || '', h.motivo || '',
+            (h.equipe && h.equipe.length && !daEquipe[x.chapa]) ? 'Adicionado (fora da equipe)' : 'Própria equipe', h.status || 'PENDENTE', h.noPrazo === false ? 'NÃO' : 'SIM', h.obsAdmin || '', h.id || '']);
+        });
+      });
+      var resumo = [['STATUS', 'PESSOAS']].concat(Object.keys(res).map(function (k) { return [k, res[k]]; })).concat([['TOTAL', i]]);
+      return window.makeXlsx([{ name: aba, rows: rows }, { name: 'Resumo', rows: resumo }]).then(function (blob) { download(blob, arquivo); done('Planilha pronta ✓ (' + i + ' pessoas)'); });
+    }).catch(function (e) { done('Erro: ' + e.message); });
+  }
+
   function horasExtras() {
     var el = document.getElementById('adm');
     A.heDate = A.heDate || addDays(today(), 1);
@@ -529,7 +645,7 @@
       var nPes = dia.reduce(function (a, h) { return a + (h.status !== 'REPROVADO' ? (h.pessoas || []).length : 0); }, 0);
       var h = '<div class="kpis"><div><b>' + dia.length + '</b><small>pedidos</small></div><div><b>' + dia.filter(function (x) { return x.status === 'PENDENTE'; }).length + '</b><small>a aprovar</small></div><div><b>' + nPes + '</b><small>pessoas</small></div></div>';
       h += '<div class="card"><div class="card-h"><h2>' + DIAS_EXT[dow(A.heDate)] + ', ' + br(A.heDate) + '</h2></div>' +
-        '<div class="row" style="flex-wrap:wrap;margin-bottom:8px"><button class="btn sm ok" id="apall">✓ Aprovar todos pendentes</button><button class="btn sm" id="pdfperm">📄 Permissões do dia (extensão e escala)</button><button class="btn sm ghost" id="pdfesc">📄 Lista nominal do dia</button></div>';
+        '<div class="row" style="flex-wrap:wrap;margin-bottom:8px"><button class="btn sm ok" id="apall">✓ Aprovar todos pendentes</button><button class="btn sm" id="pdfperm">📄 Permissões do dia (extensão e escala)</button><button class="btn sm ghost" id="pdfesc">📄 Lista nominal do dia</button><button class="btn sm ghost" id="xlsesc">📊 Lista nominal do dia (Excel)</button><button class="btn sm ghost" id="xlsper">📊 Lista nominal por período (Excel)</button></div>';
       h += dia.map(function (x) {
         var stc = x.status === 'APROVADO' ? 'background:#e8f5ec;color:#11602a' : x.status === 'REPROVADO' ? 'background:#fde7e5;color:#d93025' : 'background:#eef1f6;color:#0b2a5b';
         return '<div class="ativ"><div class="ah"><b>' + esc(x.enc) + '</b><span class="tag" style="' + stc + '">' + esc(x.status) + '</span></div>' +
@@ -565,6 +681,24 @@
       };
       [].forEach.call(document.querySelectorAll('[data-pp]'), function (b) { b.onclick = function () { var x = dia.filter(function (y) { return y.id === b.dataset.pp; })[0]; permPdf([x], A.heDate + ' - Permissão HE - ' + (x.curto || x.enc) + '.pdf'); }; });
       document.getElementById('pdfperm').onclick = function () { permPdf(dia.filter(function (x) { return x.status !== 'REPROVADO'; }), A.heDate + ' - Permissões de hora extra.pdf'); };
+      document.getElementById('xlsesc').onclick = function () {
+        var ap = dia.filter(function (x) { return x.status === 'APROVADO'; });
+        if (!ap.length) return done('Nenhum pedido aprovado neste dia');
+        heXlsx(ap, A.heDate + ' - Lista nominal de hora extra.xlsx', 'Lista nominal ' + br(A.heDate).slice(0, 5).replace('/', '-'));
+      };
+      document.getElementById('xlsper').onclick = function () {
+        var b = sheetUI('<h3>📊 Lista nominal por período</h3><p class="small muted">Traz todos os pedidos (aprovados, pendentes e reprovados) com a coluna Status.</p><div class="grid2"><div><label class="f">De</label><input type="date" id="pde" value="' + addDays(A.heDate, -6) + '"></div><div><label class="f">Até</label><input type="date" id="pate" value="' + A.heDate + '"></div></div><button class="btn block" id="pok" style="margin-top:12px">Baixar planilha</button><button class="btn block ghost" id="pno" style="margin-top:8px">Cancelar</button>');
+        b.querySelector('#pno').onclick = closeUI;
+        b.querySelector('#pok').onclick = function () {
+          var de = b.querySelector('#pde').value, ate = b.querySelector('#pate').value;
+          if (!de || !ate || ate < de) return done('Confira as datas');
+          closeUI(); busy('Buscando pedidos…');
+          api('admin_heList', { de: de, ate: ate }, 120000).then(function (r) {
+            if (!r.pedidos.length) return done('Nenhum pedido no período');
+            heXlsx(r.pedidos, 'Lista nominal de hora extra ' + de + ' a ' + ate + '.xlsx', 'Lista nominal');
+          }).catch(function (e) { done('Erro: ' + e.message); });
+        };
+      };
       document.getElementById('pdfesc').onclick = function () {
         var ap = dia.filter(function (x) { return x.status === 'APROVADO'; });
         if (!ap.length) return done('Nenhum pedido aprovado neste dia');
