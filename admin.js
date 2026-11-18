@@ -410,18 +410,105 @@
   /* ---------- Importar programação semanal e posição de frota ---------- */
   function importar() {
     var el = document.getElementById('adm');
-    el.innerHTML = '<div class="card"><div class="card-h"><h2>Programação semanal</h2></div><p class="small muted" style="margin-top:0">Escolha o arquivo da programação da semana (.xlsx, mesmo modelo de sempre). Os encarregados passam a ver a programação no celular.</p>' +
+    el.innerHTML = '<div class="card"><div class="card-h"><h2>Efetivo diário nominal (RH)</h2></div><p class="small muted" style="margin-top:0">Escolha o arquivo do dia (Efetivo Diario Nominal - ALMAS…xlsx, aba PAREX). Quem é novo entra em <b>Sem equipe</b> para o encarregado puxar. Férias, atestado, afastado INSS e folga de campo do dia já vêm marcados no RDA daquele dia. Demitidos, transferidos e funções diferentes ficam para você decidir em <b>🗂 Cadastro base › Efetivo</b>.</p>' +
+      '<label class="btn block">👷 Escolher efetivo nominal…<input type="file" id="fefe" accept=".xlsx" class="hidden"></label><div id="refe"></div></div>' +
+      '<div class="card"><div class="card-h"><h2>Programação semanal</h2></div><p class="small muted" style="margin-top:0">Escolha o arquivo da programação da semana (.xlsx, mesmo modelo de sempre). Os encarregados passam a ver a programação no celular.</p>' +
       '<label class="btn block">📋 Escolher programação…<input type="file" id="fprog" accept=".xlsx" class="hidden"></label><div id="rprog"></div></div>' +
-      '<div class="card"><div class="card-h"><h2>Posição de frota (equipamentos)</h2></div><p class="small muted" style="margin-top:0">Escolha a planilha de posição de frota. A lista da aba CADASTRO vira a sugestão de equipamentos no RDA. Ficam de fora os que estão como DESM (desmobilizado) na aba POSIÇÃO DE FROTA - ANALÍTICA na última data marcada até hoje.</p>' +
+      '<div class="card"><div class="card-h"><h2>Posição de frota (equipamentos)</h2></div><p class="small muted" style="margin-top:0">Escolha a planilha de posição de frota. A lista da aba CADASTRO vira a sugestão de equipamentos no RDA (o que você cadastrou ou editou em Cadastro base › Equipamentos é mantido). Ficam de fora os que estão como DESM (desmobilizado) na aba POSIÇÃO DE FROTA - ANALÍTICA na última data marcada até hoje.</p>' +
       '<label class="btn block ghost">🚜 Escolher posição de frota…<input type="file" id="ffrota" accept=".xlsx" class="hidden"></label><div id="rfrota"></div></div>' +
       '<div class="card"><div class="card-h"><h2>Projetos (lista do Greendocs)</h2></div><p class="small muted" style="margin-top:0">Quando sair revisão nova, exporte do Greendocs e escolha aqui a planilha (colunas Nome, Título Complementar e Revisão). Pode escolher as duas listas juntas (Projetos e PIM/CODEME). A lista do app é substituída por estas.</p>' +
       '<label class="btn block ghost">📐 Escolher lista(s) do Greendocs…<input type="file" id="fgd" accept=".xlsx" multiple class="hidden"></label><div id="rgd"></div></div>' +
       '<div class="card"><div class="card-h"><h2>TAGs</h2></div><p class="small muted" style="margin-top:0">Escolha uma ou mais planilhas com as colunas <b>TAG</b>, DESCRIÇÃO, TIPO, DOCUMENTO, DISCIPLINA e ÁREA (só a TAG é obrigatória; a ordem das colunas não importa). Só entram as TAGs <b>novas</b>; as que já existem no app não são alteradas.</p>' +
       '<label class="btn block ghost">🏷 Escolher planilha(s) de TAGs…<input type="file" id="ftag" accept=".xlsx" multiple class="hidden"></label><div id="rtag"></div></div>';
+    document.getElementById('fefe').onchange = function () { var f = this.files[0]; if (f) importEfetivo(f); this.value = ''; };
+    efePend();
     document.getElementById('fprog').onchange = function () { var f = this.files[0]; if (f) importProg(f); this.value = ''; };
     document.getElementById('ffrota').onchange = function () { var f = this.files[0]; if (f) importFrota(f); this.value = ''; };
     document.getElementById('fgd').onchange = function () { var f = [].slice.call(this.files); if (f.length) importGreendocs(f); this.value = ''; };
     document.getElementById('ftag').onchange = function () { var f = [].slice.call(this.files); if (f.length) importTags(f); this.value = ''; };
+  }
+  function importEfetivo(file) {
+    var out = document.getElementById('refe'); out.innerHTML = '<p class="empty">Lendo arquivo…</p>';
+    libsXlsx().then(function () { return window.readXlsx(file); }).then(function (book) {
+      var res = null, nomes = Object.keys(book).sort(function (a, b) { return (H(a) === 'PAREX' ? 0 : 1) - (H(b) === 'PAREX' ? 0 : 1); });
+      nomes.some(function (name) {
+        var rows = book[name];
+        for (var i = 0; i < Math.min(rows.length, 15); i++) {
+          var hdr = (rows[i] || []).map(function (x) { return typeof x === 'number' ? x : H(x); });
+          var cC = hdr.indexOf('CHAPA'), cN = hdr.indexOf('NOME');
+          if (cC < 0 || cN < 0) continue;
+          var f = function (pre) { for (var c = 0; c < hdr.length; c++) if (typeof hdr[c] === 'string' && hdr[c].indexOf(pre) === 0) return c; return -1; };
+          var cF = f('FUNC'), cM = f('MAO DE OBRA'), cS = f('SETOR'), dcols = {};
+          hdr.forEach(function (v, c) { if (typeof v === 'number' && v > 40000 && v < 60000) dcols[c] = window.xlsDate(v); });
+          var cols = Object.keys(dcols).map(Number);
+          if (!cols.length) continue;
+          var pessoas = [], ult = '';
+          for (var r = i + 1; r < rows.length; r++) {
+            var row = rows[r] || [], ch = String(row[cC] == null ? '' : row[cC]).replace(/\.0$/, '').trim(), nm = String(row[cN] || '').replace(/\s+/g, ' ').trim();
+            if (!/^\d+$/.test(ch) || !nm) continue;
+            pessoas.push({ chapa: ch, nome: nm.toUpperCase(), funcao: String(row[cF] || '').replace(/\s+/g, ' ').trim(), mo: String(row[cM] || '').trim(), setor: String(row[cS] || '').trim(), row: row });
+            cols.forEach(function (c) { if (row[c] != null && String(row[c]).trim() && dcols[c] > ult) ult = dcols[c]; });
+          }
+          if (!pessoas.length || !ult) continue;
+          var de = addDays(ult, -13), dias = {};
+          cols.forEach(function (c) { var d = dcols[c]; if (d < de || d > ult) return; var m = {}; pessoas.forEach(function (p) { var v = p.row[c]; if (v != null && String(v).trim()) m[p.chapa] = String(v).trim(); }); if (Object.keys(m).length) dias[d] = m; });
+          pessoas.forEach(function (p) { delete p.row; });
+          res = { data: ult, pessoas: pessoas, dias: dias, arquivo: file.name };
+          return true;
+        }
+        return false;
+      });
+      if (!res) throw new Error('Não encontrei a tabela do efetivo (colunas CHAPA / NOME e as datas) neste arquivo.');
+      out.innerHTML = '<p class="empty">Enviando ' + res.pessoas.length + ' pessoas (último dia preenchido: ' + br(res.data) + ')…</p>';
+      return api('admin_efeImport', res, 180000).then(function (r) {
+        var c = r.contagem || {}, ord = Object.keys(c).sort(function (a, b) { return c[b] - c[a]; });
+        out.innerHTML = '<div class="alert ok">✓ Efetivo de <b>' + br(r.data) + '</b> importado: ' + r.pessoas + ' pessoas.<br>' +
+          '<b>' + r.novos.length + '</b> nova(s) em Sem equipe · status de ' + r.dias + ' dia(s) guardados.<br>' +
+          '<span class="small">No dia: ' + ord.map(function (k) { return esc(k.toLowerCase()) + ' ' + c[k]; }).join(' · ') + '</span></div>' +
+          (r.novos.length ? '<details class="small"><summary>Ver os novos (' + r.novos.length + ')</summary>' + r.novos.map(function (n) { return esc(n.chapa) + ' – ' + esc(n.nome) + ' <span class="muted">(' + esc(n.funcao) + ')</span>'; }).join('<br>') + '</details>' : '');
+        var nd = (r.desligados || []).length, nf = (r.divergentes || []).length;
+        if (nd || nf) out.innerHTML += '<div class="alert" style="margin-top:8px">Para decidir: ' + (nd ? '<b>' + nd + '</b> demitido(s)/transferido(s) ainda em equipe' : '') + (nd && nf ? ' e ' : '') + (nf ? '<b>' + nf + '</b> função(ões) diferente(s)' : '') + '.' + (podeAba('cadastro') ? ' <button class="btn sm" id="irefe" style="margin-top:6px">Abrir Cadastro base › Efetivo</button>' : ' Peça a quem tem acesso ao Cadastro base.') + '</div>';
+        var ir = document.getElementById('irefe'); if (ir) ir.onclick = function () { A.cad = 'efe'; A.tab = 'cadastro'; render(); };
+      });
+    }).catch(function (e) { out.innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
+  }
+  function divergUI(lista) {
+    var el = document.getElementById('ffun'); if (!el) return;
+    if (!lista || !lista.length) { el.innerHTML = ''; return; }
+    var moTxt = function (a, b) { return a !== b && b ? ' <span class="muted">(MO: ' + esc(a || '–') + ' → ' + esc(b) + ')</span>' : ''; };
+    el.innerHTML = '<div class="alert" style="margin-top:10px"><b>' + lista.length + ' função(ões) diferente(s) entre a planilha e o app.</b> Para cada pessoa escolha: <b>Manter a do app</b>, <b>Usar a da planilha</b> ou <b>Editar</b> e escrever a função do jeito que você quer.</div>' +
+      lista.map(function (x, i) {
+        return '<div style="border-bottom:1px solid #e5e8ee;padding:8px 0"><div class="small"><b>' + esc(x.nome) + '</b> · ' + esc(x.chapa) + ' <span class="muted">· equipe: ' + esc(x.enc) + '</span></div>' +
+          '<div class="small" style="margin:4px 0">No app: <b>' + esc(x.app || '–') + '</b><br>Na planilha: <b style="color:#0b2a5b">' + esc(x.planilha || '–') + '</b>' + moTxt(x.moApp, x.moPla) + '</div>' +
+          '<div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn sm ghost" data-fm="' + i + '">Manter a do app</button><button class="btn sm" data-fp="' + i + '">Usar a da planilha</button><button class="btn sm ghost" data-fe="' + i + '">✏️ Editar</button></div>' +
+          '<div class="row hidden" id="fed' + i + '" style="gap:6px;margin-top:6px"><input id="fei' + i + '" value="' + esc(x.planilha || x.app) + '" style="flex:1"><button class="btn sm" data-fs="' + i + '">Salvar</button></div></div>';
+      }).join('') + (lista.length > 1 ? '<button class="btn sm" id="fpall" style="margin-top:8px">Usar a da planilha em todas</button>' : '');
+    var go = function (itens) { busy('Salvando…'); api('admin_efeFuncao', { itens: itens }).then(function (r) { done('Feito ✓'); divergUI(r.divergentes); cadEfeRecarrega(); }).catch(function (e) { done('Erro: ' + e.message); }); };
+    el.querySelectorAll('[data-fm]').forEach(function (b) { b.onclick = function () { go([{ chapa: lista[+b.dataset.fm].chapa, acao: 'manter' }]); }; });
+    el.querySelectorAll('[data-fp]').forEach(function (b) { b.onclick = function () { go([{ chapa: lista[+b.dataset.fp].chapa, acao: 'planilha' }]); }; });
+    el.querySelectorAll('[data-fe]').forEach(function (b) { b.onclick = function () { var r = document.getElementById('fed' + b.dataset.fe); r.classList.remove('hidden'); document.getElementById('fei' + b.dataset.fe).focus(); }; });
+    el.querySelectorAll('[data-fs]').forEach(function (b) { b.onclick = function () { var v = document.getElementById('fei' + b.dataset.fs).value.trim(); if (!v) return done('Escreva a função'); go([{ chapa: lista[+b.dataset.fs].chapa, acao: 'editar', funcao: v }]); }; });
+    var all = document.getElementById('fpall'); if (all) all.onclick = function () { if (confirm('Usar a função da planilha nas ' + lista.length + ' pessoas?')) go(lista.map(function (x) { return { chapa: x.chapa, acao: 'planilha' }; })); };
+  }
+  function efePend() {
+    api('admin_efeInfo').then(function (r) {
+      var out = document.getElementById('refe'); if (!out || out.innerHTML) return;
+      if (r.ultima) out.innerHTML = '<p class="small muted">Último efetivo importado: <b>' + br(r.ultima) + '</b> (em ' + esc(String(r.importadoEm).slice(0, 16).split(' ').map(function (x, i) { return i ? x : br(x); }).join(' ')) + ').' +
+        (r.desligados || r.divergentes ? ' Pendente em Cadastro base › Efetivo: ' + (r.desligados ? r.desligados + ' desligado(s)' : '') + (r.desligados && r.divergentes ? ' e ' : '') + (r.divergentes ? r.divergentes + ' função(ões)' : '') + '.' : '') + '</p>';
+    }).catch(function () { });
+  }
+  function desligadosUI(lista) {
+    var el = document.getElementById('pefe'); if (!el) return;
+    if (!lista || !lista.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<div class="alert" style="margin-top:10px"><b>' + lista.length + ' pessoa(s) desligada(s) na planilha que ainda estão no app.</b> Decida uma por uma: <b>Tirar da equipe</b> (sai do RDA e da hora extra; o histórico fica guardado) ou <b>Manter</b>.</div>' +
+      lista.map(function (x, i) {
+        return '<div class="row" style="justify-content:space-between;border-bottom:1px solid #e5e8ee;padding:6px 0;gap:8px"><div class="small"><b>' + esc(x.nome) + '</b><br>' + esc(x.chapa) + ' · ' + esc(x.funcao) + '<br><span style="color:#c62828"><b>' + esc(x.status) + '</b> em ' + br(x.data) + '</span> · equipe: ' + esc(x.enc) + '</div>' +
+          '<div class="row" style="gap:6px;flex-shrink:0"><button class="btn sm" data-dl="' + i + '">Tirar da equipe</button><button class="btn sm ghost" data-dm="' + i + '">Manter</button></div></div>';
+      }).join('') + (lista.length > 1 ? '<button class="btn sm" id="dlall" style="margin-top:8px">Tirar todos da equipe</button>' : '');
+    var go = function (itens) { busy('Salvando…'); api('admin_efeDeslig', { itens: itens }).then(function (r) { done('Feito ✓'); desligadosUI(r.desligados); cadEfeRecarrega(); }).catch(function (e) { done('Erro: ' + e.message); }); };
+    el.querySelectorAll('[data-dl]').forEach(function (b) { b.onclick = function () { var x = lista[+b.dataset.dl]; go([{ chapa: x.chapa, status: x.status, acao: 'tirar' }]); }; });
+    el.querySelectorAll('[data-dm]').forEach(function (b) { b.onclick = function () { var x = lista[+b.dataset.dm]; go([{ chapa: x.chapa, status: x.status, acao: 'manter' }]); }; });
+    var all = document.getElementById('dlall'); if (all) all.onclick = function () { if (confirm('Tirar as ' + lista.length + ' pessoas da equipe?')) go(lista.map(function (x) { return { chapa: x.chapa, status: x.status, acao: 'tirar' }; })); };
   }
   function importTags(files) {
     var out = document.getElementById('rtag'); out.innerHTML = '<p class="empty">Lendo arquivo(s)…</p>';
@@ -570,7 +657,7 @@
         return false;
       });
       if (!itens || !itens.length) throw new Error('Não encontrei a aba de cadastro (coluna TIPO EQUIPAMENTO).');
-      return api('admin_setEquip', { itens: itens }).then(function (r) { out.innerHTML = '<div class="alert ok">✓ ' + r.itens + ' equipamentos atualizados' + (nDesm ? ' (' + nDesm + ' desmobilizado(s) na aba ANALÍTICA ficaram de fora)' : '') + '. Os celulares recebem a lista na próxima sincronização.</div>'; });
+      return api('admin_setEquip', { itens: itens }).then(function (r) { out.innerHTML = '<div class="alert ok">✓ ' + r.itens + ' equipamentos atualizados' + (nDesm ? ' (' + nDesm + ' desmobilizado(s) na aba ANALÍTICA ficaram de fora)' : '') + (r.manuais ? '. ' + r.manuais + ' cadastrado(s)/editado(s) no Cadastro base foram mantidos' : '') + '. Os celulares recebem a lista na próxima sincronização.</div>'; });
     }).catch(function (e) { out.innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
   }
 
@@ -714,13 +801,13 @@
 
 
   /* ---------- cadastro base ---------- */
-  var CADS = [['enc', '👷 Encarregados'], ['area', '📍 Áreas']];
+  var CADS = [['enc', '👷 Encarregados'], ['efe', '👥 Efetivo'], ['eqp', '🚜 Equipamentos'], ['area', '📍 Áreas']];
   function cadastro() {
     var el = document.getElementById('adm');
     A.cad = A.cad || 'enc';
     el.innerHTML = '<div class="chips" style="margin:0 0 10px">' + CADS.map(function (c) { return '<button data-cad="' + c[0] + '" class="' + (A.cad === c[0] ? 'sel' : '') + '">' + c[1] + '</button>'; }).join('') + '</div><div id="cadbox"><p class="empty">Carregando…</p></div>';
     [].forEach.call(el.querySelectorAll('[data-cad]'), function (b) { b.onclick = function () { A.cad = b.dataset.cad; cadastro(); }; });
-    if (A.cad === 'area') cadAreas(); else cadEnc();
+    if (A.cad === 'area') cadAreas(); else if (A.cad === 'efe') cadEfe(); else if (A.cad === 'eqp') cadEqp(); else cadEnc();
   }
   function cadErro(e) { var b = document.getElementById('cadbox'); if (b) b.innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; }
 
@@ -799,6 +886,98 @@
   }
 
   /* ----- áreas ----- */
+  /* ----- efetivo ----- */
+  function cadEfeRecarrega() { if (document.getElementById('efelist')) api('admin_efeList').then(function (r) { A.efeCad = r; cadEfeLista(); }).catch(function () { }); }
+  function cadEfe() {
+    var box = document.getElementById('cadbox');
+    Promise.all([api('admin_efeList'), api('admin_efePend')]).then(function (x) {
+      A.efeCad = x[0];
+      box.innerHTML = '<div id="pefe"></div><div id="ffun"></div><div id="efelist"></div>';
+      desligadosUI(x[1].desligados); divergUI(x[1].divergentes); cadEfeLista();
+    }).catch(cadErro);
+  }
+  function cadEfeLista() {
+    var j = A.efeCad, el = document.getElementById('efelist'); if (!el || !j) return;
+    var f = A.efeBusca || '';
+    var ok = function (p) { return !f || U().norm(p.nome + ' ' + p.chapa + ' ' + p.funcao + ' ' + p.enc).indexOf(U().norm(f)) >= 0; };
+    var lista = j.pessoas.filter(ok), grupos = {};
+    lista.forEach(function (p) { (grupos[p.enc] = grupos[p.enc] || []).push(p); });
+    var ordem = Object.keys(grupos).sort(function (a, b) { var r = function (k) { return k === 'SEM EQUIPE' ? 0 : k === 'DESLIGADO' ? 2 : 1; }; return r(a) - r(b) || a.localeCompare(b); });
+    var ativos = j.pessoas.filter(function (p) { return p.enc !== 'DESLIGADO'; }).length;
+    var h = '<div class="card"><div class="row" style="align-items:center"><input id="pbusca" placeholder="🔍 Procurar nome, chapa, função ou equipe" value="' + esc(f) + '"><button class="btn" id="pnovo" style="flex:0 0 auto">＋ Nova</button></div>' +
+      '<p class="small muted" style="margin-bottom:0">' + ativos + ' pessoas no efetivo do app. Toque num nome para editar a função, o tipo de MO ou a equipe, ou para desligar. Mudanças chegam no celular na próxima sincronização.</p></div>';
+    ordem.forEach(function (k) {
+      var g = grupos[k].sort(function (a, b) { return a.nome.localeCompare(b.nome); });
+      h += '<details class="card"' + (f || k === 'SEM EQUIPE' ? ' open' : '') + '><summary style="cursor:pointer"><b>' + esc(k === 'DESLIGADO' ? 'Desligados (fora do app)' : k) + '</b> <span class="muted small">(' + g.length + ')</span></summary>' +
+        g.map(function (p) { return '<div class="rdaline" data-pc="' + esc(p.chapa) + '" style="cursor:pointer"><div class="tx"><b>' + esc(p.nome) + '</b><small>' + esc(p.chapa) + ' · ' + esc(p.funcao || '–') + (p.mo ? ' · ' + esc(p.mo) : '') + '</small></div><span class="muted">›</span></div>'; }).join('') + '</details>';
+    });
+    if (!lista.length) h += '<p class="empty">Ninguém encontrado</p>';
+    el.innerHTML = h;
+    var pb = document.getElementById('pbusca');
+    pb.oninput = function () { A.efeBusca = pb.value; var pos = pb.selectionStart; cadEfeLista(); var n = document.getElementById('pbusca'); n.focus(); n.setSelectionRange(pos, pos); };
+    document.getElementById('pnovo').onclick = function () { efeForm(null); };
+    [].forEach.call(el.querySelectorAll('[data-pc]'), function (r) { r.onclick = function () { efeForm(j.pessoas.filter(function (p) { return p.chapa === r.dataset.pc; })[0]); }; });
+  }
+  function efeForm(p) {
+    var j = A.efeCad, nova = !p; p = p || { chapa: '', nome: '', funcao: '', disciplina: '', enc: 'SEM EQUIPE', mo: 'MOD' };
+    var deslig = p.enc === 'DESLIGADO';
+    var encs = ['SEM EQUIPE'].concat(j.encarregados); if (!deslig && encs.indexOf(p.enc) < 0) encs.push(p.enc);
+    var b = sheetUI('<h3>' + (nova ? 'Nova pessoa no efetivo' : 'Editar pessoa') + '</h3>' +
+      '<label class="f" style="margin-top:0">Chapa</label><input id="pc" value="' + esc(p.chapa) + '" inputmode="numeric"' + (nova ? '' : ' disabled') + '>' +
+      '<label class="f">Nome</label><input id="pn" value="' + esc(p.nome) + '" autocapitalize="characters">' +
+      '<label class="f">Função</label><input id="pf" value="' + esc(p.funcao) + '" autocapitalize="characters">' +
+      '<label class="f">Tipo de MO</label><select id="pm"><option' + (p.mo === 'MOD' ? ' selected' : '') + '>MOD</option><option' + (p.mo === 'MOI' ? ' selected' : '') + '>MOI</option></select>' +
+      '<label class="f">Disciplina</label><input id="pd" list="pdl" value="' + esc(p.disciplina) + '" autocapitalize="characters"><datalist id="pdl">' + (j.disciplinas || []).map(function (d) { return '<option value="' + esc(d) + '">'; }).join('') + '</datalist>' +
+      (deslig ? '<div class="alert" style="margin-top:10px">Esta pessoa está <b>desligada</b> e não aparece no app. Use <b>Reativar</b> para voltar (entra em Sem equipe).</div>' :
+        '<label class="f">Equipe (encarregado)</label><select id="pe">' + encs.map(function (e) { return '<option' + (e === p.enc ? ' selected' : '') + '>' + esc(e) + '</option>'; }).join('') + '</select>') +
+      '<div class="row" style="margin-top:14px;flex-wrap:wrap">' + (nova ? '' : (deslig ? '<button class="btn ghost" id="preat">Reativar</button>' : '<button class="btn danger" id="pdes">Desligar</button>')) + '<button class="btn" id="pok">' + (nova ? 'Cadastrar' : 'Salvar') + '</button></div>');
+    var go = function (acao) {
+      busy('Salvando…');
+      var pe = b.querySelector('#pe');
+      api('admin_efeSave', { orig: nova ? null : p.chapa, acao: acao || 'salvar', pessoa: { chapa: b.querySelector('#pc').value, nome: b.querySelector('#pn').value, funcao: b.querySelector('#pf').value, mo: b.querySelector('#pm').value, disciplina: b.querySelector('#pd').value, enc: pe ? pe.value : p.enc } })
+        .then(function (r) { closeUI(); done(acao === 'desligar' ? 'Desligado ✓' : acao === 'reativar' ? 'Reativado ✓' : 'Salvo ✓'); A.efeCad = r; cadEfe(); })
+        .catch(function (x) { done('Erro: ' + x.message); });
+    };
+    b.querySelector('#pok').onclick = function () { go('salvar'); };
+    var d = b.querySelector('#pdes'); if (d) d.onclick = function () { if (confirm('Desligar ' + p.nome + '?\n\nSai da equipe, do RDA e da hora extra. O histórico fica guardado.')) go('desligar'); };
+    var r = b.querySelector('#preat'); if (r) r.onclick = function () { go('reativar'); };
+  }
+
+  /* ----- equipamentos ----- */
+  function cadEqp(j) {
+    var box = document.getElementById('cadbox');
+    if (!j) return api('admin_eqpList').then(function (r) { A.eqpCad = r; cadEqp(r); }).catch(cadErro);
+    var f = A.eqpBusca || '';
+    var lista = j.itens.filter(function (e) { return !f || U().norm(e.d + ' ' + e.t + ' ' + e.p + ' ' + e.f).indexOf(U().norm(f)) >= 0; });
+    var man = j.itens.filter(function (e) { return e.o === 'MANUAL'; }).length;
+    box.innerHTML = '<div class="card"><div class="row" style="align-items:center"><input id="qbusca" placeholder="🔍 Procurar descrição, TAG, placa ou fornecedor" value="' + esc(f) + '"><button class="btn" id="qnovo" style="flex:0 0 auto">＋ Novo</button></div>' +
+      '<p class="small muted" style="margin-bottom:0">' + j.itens.length + ' equipamentos' + (man ? ' (' + man + ' cadastrado(s)/editado(s) aqui)' : '') + '. É a lista que o encarregado vê no RDA. O que você cadastrar ou editar aqui <b>fica</b> mesmo quando a posição de frota for importada de novo.</p></div>' +
+      '<div class="card">' + (lista.map(function (e) {
+        return '<div class="rdaline" data-qi="' + e.i + '" style="cursor:pointer"><div class="tx"><b>' + esc(e.d) + '</b><small>' + [e.t && 'TAG ' + e.t, e.p && 'Placa/série ' + e.p, e.f].filter(Boolean).map(esc).join(' · ') + '</small></div>' + (e.o === 'MANUAL' ? '<span class="tag">Editado aqui</span>' : '') + '<span class="muted">›</span></div>';
+      }).join('') || '<p class="empty">Nenhum equipamento encontrado</p>') + '</div>';
+    var qb = document.getElementById('qbusca');
+    qb.oninput = function () { A.eqpBusca = qb.value; var pos = qb.selectionStart; cadEqp(j); var n = document.getElementById('qbusca'); n.focus(); n.setSelectionRange(pos, pos); };
+    document.getElementById('qnovo').onclick = function () { eqpForm(null); };
+    [].forEach.call(box.querySelectorAll('[data-qi]'), function (r) { r.onclick = function () { eqpForm(j.itens.filter(function (e) { return e.i === +r.dataset.qi; })[0]); }; });
+  }
+  function eqpForm(e) {
+    var novo = !e; e = e || { d: '', t: '', p: '', f: '' };
+    var b = sheetUI('<h3>' + (novo ? 'Novo equipamento' : 'Editar equipamento') + '</h3>' +
+      '<label class="f" style="margin-top:0">Descrição</label><input id="qd" value="' + esc(e.d) + '" autocapitalize="characters" placeholder="Ex.: GUINDASTE 50T">' +
+      '<label class="f">TAG</label><input id="qt" value="' + esc(e.t) + '" autocapitalize="characters">' +
+      '<label class="f">Placa / série</label><input id="qp" value="' + esc(e.p) + '" autocapitalize="characters">' +
+      '<label class="f">Fornecedor</label><input id="qf" value="' + esc(e.f) + '" autocapitalize="characters">' +
+      (novo ? '' : '<p class="small muted">RDAs já enviados continuam com o equipamento escrito como estava.</p>') +
+      '<div class="row" style="margin-top:14px">' + (novo ? '' : '<button class="btn danger" id="qrm">Excluir</button>') + '<button class="btn" id="qok">' + (novo ? 'Cadastrar' : 'Salvar') + '</button></div>');
+    var go = function (rm) {
+      busy('Salvando…');
+      api('admin_eqpSave', { orig: novo ? null : { i: e.i, d: e.d }, item: { d: b.querySelector('#qd').value, t: b.querySelector('#qt').value, p: b.querySelector('#qp').value, f: b.querySelector('#qf').value }, remove: !!rm })
+        .then(function (r) { closeUI(); done(rm ? 'Excluído ✓' : 'Salvo ✓'); A.eqpCad = r; cadEqp(r); }).catch(function (x) { done('Erro: ' + x.message); });
+    };
+    b.querySelector('#qok').onclick = function () { go(false); };
+    var rm = b.querySelector('#qrm'); if (rm) rm.onclick = function () { if (confirm('Excluir ' + e.d + ' da lista?' + (e.o === 'MANUAL' ? '' : '\n\nSe ele continuar na posição de frota, volta na próxima importação.'))) go(true); };
+  }
+
   function cadAreas(j) {
     var box = document.getElementById('cadbox');
     if (!j) return api('admin_areas').then(function (r) { cadAreas(r); }).catch(cadErro);
