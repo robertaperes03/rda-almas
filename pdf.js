@@ -97,7 +97,7 @@
       var ini = t.inicio || (t.nome && !r.branco ? '-' : ':'), fim = t.termino || (t.nome && !r.branco ? '-' : ':');
       var row = muro ? [i + 1, t.chapa || '-', { t: t.nome || '', align: 'center' }, { t: t.funcao || '', align: 'center' }, { t: t.status || '', bold: true, size: 6 }, ini, fim]
         : [i + 1, t.chapa || '-', { t: t.nome || '', align: 'left' }, { t: t.funcao || '', align: 'left' }, ini, fim, { t: t.status || '', bold: true, size: 6.3, color: t.status && t.status !== 'PRESENTE' ? [190, 30, 30] : [0, 0, 0] }];
-      p.cols(row, widths, p.y, rh, { size: 6.8 });
+      p.cols(row, widths, p.y, rh, { size: rh < 4.2 ? 6.2 : 6.8 });
       p.y += rh;
     }
   }
@@ -117,11 +117,11 @@
     var widths = [14, 116, 34, 30], at = r.atividades || [];
     ensure(p, 6 + 10, r, ctx.logo, ctx.titulo);
     p.cols([{ t: 'Nº ATIVIDADE', size: 5.8, wrap: true }, 'DESCRIÇÃO DAS ATIVIDADES', 'ÁREA', 'QTD MONTADA'], widths, p.y, 6, { bold: true, fill: GRAY }); p.y += 6;
-    var n = Math.max(at.length, r.branco ? 6 : 4);
+    var n = Math.max(at.length, r.branco ? (r._atN || 6) : 4);
     for (var i = 0; i < n; i++) {
       var a = at[i] || {};
       var desc = (a.desc || '') + ((a.projetos || []).length ? '  | Projeto: ' + a.projetos.join(', ') : '') + ((a.tags || []).length ? '  | TAG: ' + a.tags.join(', ') : '') + (a.progId ? (a.concluida ? '  [Programação: concluída]' : '  [Programação: em andamento]') : '') + ((a.fotos || []).length ? '  (' + a.fotos.length + ' foto' + (a.fotos.length > 1 ? 's' : '') + ' – ver registro fotográfico)' : '');
-      var h = Math.max(11, p.lines(desc, widths[1], 8) * 3.6 + 3, p.lines(a.area || '', widths[2], 7) * 3.2 + 3);
+      var h = Math.max(r.branco ? (r._atH || 11) : 11, p.lines(desc, widths[1], 8) * 3.6 + 3, p.lines(a.area || '', widths[2], 7) * 3.2 + 3);
       ensure(p, h, r, ctx.logo, ctx.titulo);
       p.cols([i + 1, { t: desc, align: 'left', wrap: true, size: 8, color: [10, 30, 120] }, { t: a.area || '', wrap: true, size: 7 }, a.qtd || ''], widths, p.y, h, { size: 7.5 });
       p.y += h;
@@ -259,11 +259,11 @@
     p.text('PERMISSÃO PARA HORAS EXTRAS', M + 36, y + 1.5, 112, 6, { bold: true, size: 10 });
     p.text(OBRA, M + 36, y + 7.5, 112, 6, { bold: true, size: 9 });
     p.box(M + 148, y, CW - 148, 15); lbl('DATA:', M + 148, y, 20);
-    p.text(br(String(h.pedidoEm || '').slice(0, 10)), M + 148, y + 3, CW - 148, 12, { size: 12, color: BLUE });
+    p.text(h.branco ? '____/____/______' : br(String(h.pedidoEm || '').slice(0, 10)), M + 148, y + 3, CW - 148, 12, { size: h.branco ? 10 : 12, color: h.branco ? [0, 0, 0] : BLUE });
     y += 15;
     // linha de identificação
     var wi = [30, 52, 24, 38, CW - 144], li = ['Data da atividade:', 'Encarregado:', 'Turno:', 'Área:', 'Responsável:'];
-    var vi = [{ t: br(h.date), size: 10 }, { t: h.enc || '', size: 7 }, { t: h.turno || 'DIURNO', size: 8 }, { t: h.area || '', size: 6.8, wrap: true }, { t: h.supervisor || '', size: 6.8 }];
+    var vi = [{ t: h.branco ? '____/____/______' : br(h.date), size: h.branco ? 8 : 10 }, { t: h.enc || '', size: 7 }, { t: h.branco ? '' : h.turno || 'DIURNO', size: 8 }, { t: h.area || '', size: 6.8, wrap: true }, { t: h.supervisor || '', size: 6.8 }];
     var x = M, ih = 10;
     wi.forEach(function (w, k) { p.box(x, y, w, ih); lbl(li[k], x, y, w); p.text(vi[k].t, x, y + 3, w, ih - 3, { size: vi[k].size, wrap: vi[k].wrap, color: k === 0 || k === 2 || k === 3 ? BLUE : [0, 0, 0] }); x += w; });
     y += ih;
@@ -282,19 +282,20 @@
     var naLista = {}; lista.forEach(function (q) { naLista[q.chapa] = 1; });
     (h.pessoas || []).forEach(function (q) { if (!naLista[q.chapa]) { naLista[q.chapa] = 1; lista.push(Object.assign({}, q, { funcao: (q.funcao || '') + ' (adicionado)' })); } });
     var n = Math.max(lista.length, 25);
+    if (n > 27) RH = Math.max(3.6, 168 / n);
     for (var i = 0; i < n; i++) {
       var t = lista[i] || {}, on = !!(t.chapa && sel[t.chapa]);
       if (p.y + RH > BOT) { ensure(p, RH + 10, { numero: 'Permissão', date: h.date }); thead(); }
       p.cols([i + 1, t.chapa || '-', { t: t.nome || '', size: 6.5 }, '', { t: t.funcao || '', size: 6 }, ''], widths, p.y, RH, { size: 6.8 });
       var mx = M + widths[0] + widths[1] + widths[2], cy = p.y + (RH - 3) / 2;
       box(mx + 3, cy, on); p.text('SIM', mx + 6.5, p.y, 8, RH, { size: 6, align: 'left' });
-      box(mx + 17, cy, t.chapa && !on); p.text('NÃO', mx + 20.5, p.y, 9, RH, { size: 6, align: 'left' });
+      box(mx + 17, cy, t.chapa && !on && !h.branco); p.text('NÃO', mx + 20.5, p.y, 9, RH, { size: 6, align: 'left' });
       p.y += RH;
     }
     // descrição dos serviços (linhas pautadas)
     var tipo = h.tipo === 'ESCALA' ? 'Escala (dia não útil)' : 'Extensão de horário';
     d.setFont('helvetica', 'normal'); d.setFontSize(8.5);
-    var txt = [tipo + '  ·  Horário: ' + (h.ini || '') + ' às ' + (h.fim || '')].concat(d.splitTextToSize(String(h.motivo || ''), CW - 6));
+    var txt = h.branco ? [] : [tipo + '  ·  Horário: ' + (h.ini || '') + ' às ' + (h.fim || '')].concat(d.splitTextToSize(String(h.motivo || ''), CW - 6));
     var LH = 6, nl = Math.max(6, txt.length);
     ensure(p, 6 + nl * LH + 32, { numero: 'Permissão', date: h.date });
     p.cell('Descrição dos serviços a serem executados:', M, p.y, CW, 5.5, { bold: true, size: 8.5 }); p.y += 5.5;
@@ -312,6 +313,7 @@
     p.text(h.enc || '', M, p.y + ah - 5, wa[0], 4, { size: 6 });
     p.y += ah;
     var st = h.status || 'PENDENTE';
+    if (h.branco) { pageFooter(doc, start, 'Permissão em branco para preenchimento manual – equipe impressa em ' + (h.impressoEm || '')); return doc; }
     pageFooter(doc, start, 'Pedido ' + (h.id || '') + '  ·  ' + (h.enc || '') + '  ·  ' + st + (h.decididoEm ? ' em ' + br(String(h.decididoEm).slice(0, 10)) : '') + (h.noPrazo === false ? '  ·  FORA DO PRAZO' : '') + (h.obsAdmin ? '  ·  Obs.: ' + h.obsAdmin : ''));
     return doc;
   };
@@ -373,12 +375,26 @@
     var avail = BOT - p.y - 8 - other;
     var maxRows = muro ? 15 : 26;
     var minRows = Math.min(maxRows, Math.max((r.team || []).length, Math.floor(avail / rh)));
-    if (r.branco) minRows = Math.max(minRows, (r.team || []).length + 3);
+    var eqN = muro ? 5 : 4, paN = muro ? 6 : 2;
+    if (r.branco) {
+      // RDA em branco: tudo numa folha só. Vai enxugando as linhas em branco até a equipe caber.
+      var nt = (r.team || []).length, top = BOT - p.y - 8 - 1.5, lv = muro ? [[6, 6, 0, 0, 3], [5, 4, 0, 0, 2], [4, 3, 0, 0, 2], [3, 2, 0, 0, 1]]
+        : [[6, 4, 6, 11, 3], [5, 3, 5, 9, 2], [4, 2, 4, 8, 2], [3, 2, 3, 7, 1]], es;
+      for (var li = 0; li < lv.length; li++) {
+        var L = lv[li], oth = muro ? (9 + L[0] * 4.8 + 7 + 10 * 5 + 9.5 + L[1] * 5 + 25) : (9 + L[0] * 4.8 + 6 + L[2] * L[3] + 9.5 + L[1] * 5 + 25);
+        es = { L: L, a: top - oth };
+        if (es.a / (nt + L[4]) >= 3.8) break;
+      }
+      eqN = es.L[0]; paN = es.L[1]; r._atN = es.L[2]; r._atH = es.L[3];
+      rh = Math.min(4.8, es.a / (nt + es.L[4]));
+      minRows = Math.max(nt + es.L[4], Math.floor(es.a / rh));
+    }
     var widths = muro ? [12, 16, 64, 38, 32, 16, 16] : [10, 14, 64, 42, 16, 16, 32];
     teamTable(p, r, widths, minRows, rh, muro);
-    equipTable(p, r, r.branco ? 6 : (muro ? 5 : 4), rh, ctx);
+    rh = 4.8;
+    equipTable(p, r, eqN, rh, ctx);
     if (muro) muroAtivTable(p, r, ctx); else ativTable(p, r, ctx);
-    paralTable(p, r, ctx, muro, muro ? 6 : (r.branco ? 4 : 2));
+    paralTable(p, r, ctx, muro, paN);
     signBlock(p, r, opts.assinatura, ctx);
     if (r.armacao && r.armacao.length) { doc.addPage(); p.y = M; armPages(p, r, opts.logo); }
     photoPages(p, r, opts.fotos, ctx);
