@@ -50,6 +50,7 @@
     return out;
   };
   Doc.prototype.rect = function (x, y, w, h, style) { this.pages[this.cur].push({ k: 'rect', x: x, y: y, w: w, h: h, fill: style === 'FD' || style === 'F' ? this.st.fill.slice() : null, draw: this.st.draw.slice(), lw: this.st.lw }); };
+  Doc.prototype.line = function (x1, y1, x2, y2) { this.pages[this.cur].push({ k: 'line', x1: x1, y1: y1, x2: x2, y2: y2, draw: this.st.draw.slice(), lw: this.st.lw }); };
   Doc.prototype.text = function (lines, x, y, o) {
     o = o || {}; if (!Array.isArray(lines)) lines = [lines];
     var lh = this.st.size * (o.lineHeightFactor || 1.15) / K, self = this;
@@ -76,6 +77,8 @@
               var a = { x: op.x * K, y: PH - (op.y + op.h) * K, width: op.w * K, height: op.h * K, borderWidth: op.lw * K, borderColor: L.rgb(op.draw[0] / 255, op.draw[1] / 255, op.draw[2] / 255) };
               if (op.fill) a.color = L.rgb(op.fill[0] / 255, op.fill[1] / 255, op.fill[2] / 255);
               pg.drawRectangle(a);
+            } else if (op.k === 'line') {
+              pg.drawLine({ start: { x: op.x1 * K, y: PH - op.y1 * K }, end: { x: op.x2 * K, y: PH - op.y2 * K }, thickness: op.lw * K, color: L.rgb(op.draw[0] / 255, op.draw[1] / 255, op.draw[2] / 255) });
             } else if (op.k === 'text') {
               if (op.t) pg.drawText(op.t, { x: op.x * K, y: PH - op.y * K, size: op.size, font: op.bold ? fonts.b : fonts.n, color: L.rgb(op.color[0] / 255, op.color[1] / 255, op.color[2] / 255) });
             } else if (op.k === 'img') {
