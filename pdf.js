@@ -40,7 +40,7 @@
     p.text(titulo, M + 36, y + 1.5, 112, 6, { bold: true, size: 9.5 });
     p.text(OBRA, M + 36, y + 7.5, 112, 6, { bold: true, size: 9.5 });
     p.box(M + 148, y, CW - 148, 15);
-    p.text('DATA:   ' + br(r.date), M + 148, y, CW - 148, 15, { bold: true, size: 10 });
+    p.text('DATA:   ' + (r.branco ? '____/____/______' : br(r.date)), M + 148, y, CW - 148, 15, { bold: true, size: 10 });
     return y + 15;
   }
   function climaBlock(p, r, y) {
@@ -94,7 +94,7 @@
     for (var i = 0; i < n; i++) {
       var t = team[i] || {};
       ensure(p, rh, r, null, '');
-      var ini = t.inicio || (t.nome ? '-' : ':'), fim = t.termino || (t.nome ? '-' : ':');
+      var ini = t.inicio || (t.nome && !r.branco ? '-' : ':'), fim = t.termino || (t.nome && !r.branco ? '-' : ':');
       var row = muro ? [i + 1, t.chapa || '-', { t: t.nome || '', align: 'center' }, { t: t.funcao || '', align: 'center' }, { t: t.status || '', bold: true, size: 6 }, ini, fim]
         : [i + 1, t.chapa || '-', { t: t.nome || '', align: 'left' }, { t: t.funcao || '', align: 'left' }, ini, fim, { t: t.status || '', bold: true, size: 6.3, color: t.status && t.status !== 'PRESENTE' ? [190, 30, 30] : [0, 0, 0] }];
       p.cols(row, widths, p.y, rh, { size: 6.8 });
@@ -117,7 +117,7 @@
     var widths = [14, 116, 34, 30], at = r.atividades || [];
     ensure(p, 6 + 10, r, ctx.logo, ctx.titulo);
     p.cols([{ t: 'Nº ATIVIDADE', size: 5.8, wrap: true }, 'DESCRIÇÃO DAS ATIVIDADES', 'ÁREA', 'QTD MONTADA'], widths, p.y, 6, { bold: true, fill: GRAY }); p.y += 6;
-    var n = Math.max(at.length, 4);
+    var n = Math.max(at.length, r.branco ? 6 : 4);
     for (var i = 0; i < n; i++) {
       var a = at[i] || {};
       var desc = (a.desc || '') + ((a.projetos || []).length ? '  | Projeto: ' + a.projetos.join(', ') : '') + ((a.tags || []).length ? '  | TAG: ' + a.tags.join(', ') : '') + (a.progId ? (a.concluida ? '  [Programação: concluída]' : '  [Programação: em andamento]') : '') + ((a.fotos || []).length ? '  (' + a.fotos.length + ' foto' + (a.fotos.length > 1 ? 's' : '') + ' – ver registro fotográfico)' : '');
@@ -246,53 +246,73 @@
     return doc;
   };
 
-  /** Permissão para horas extras (modelo da obra), um pedido por página */
+  /** Permissão para horas extras – mesma estrutura do formulário em papel da obra, um pedido por página */
   window.buildPermissaoPdf = function (h, opts, doc) {
     opts = opts || {};
-    var start = newDocPage(doc), p = new Pdf(doc);
+    var start = newDocPage(doc), p = new Pdf(doc), d = doc, BLUE = [20, 40, 160];
     p.ctx = { titulo: 'PERMISSÃO PARA HORAS EXTRAS' };
-    p.y = simpleHeader(p, 'PERMISSÃO PARA HORAS EXTRAS', 'DATA:  ' + br(String(h.pedidoEm || '').slice(0, 10)) + '\n(emissão)', opts.logo);
-    var w5 = [30, 56, 22, 50, CW - 158];
-    p.cols(['Data prevista:', 'Encarregado:', 'Turno:', 'Área:', 'Responsável:'], w5, p.y, 5, { bold: true, fill: GRAY, size: 7 }); p.y += 5;
-    p.cols([br(h.date), { t: h.enc, size: 6.8 }, h.turno || 'DIURNO', { t: h.area || '', wrap: true, size: 6.5 }, { t: h.supervisor || '', size: 6.5 }], w5, p.y, 7, { size: 7.5 }); p.y += 7;
-    var tipo = h.tipo === 'ESCALA' ? 'ESCALA (DIA NÃO ÚTIL)' : 'EXTENSÃO DE HORÁRIO';
-    p.cols([{ t: 'Tipo: ' + tipo, bold: true }, { t: 'Horário: ' + (h.ini || '') + ' às ' + (h.fim || ''), bold: true }], [CW / 2, CW / 2], p.y, 6, { size: 8 }); p.y += 6;
-    var mh = Math.max(9, p.lines(h.motivo, CW - 4, 8) * 3.5 + 3);
-    p.cell('ATIVIDADE A SER REALIZADA NAS HORAS EXTRAS', M, p.y, CW, 4.5, { bold: true, fill: GRAY, size: 7 }); p.y += 4.5;
-    p.cell(h.motivo || '', M, p.y, CW, mh, { align: 'left', wrap: true, size: 8, color: [10, 30, 120] }); p.y += mh + 2;
-    var widths = [12, 16, 66, 16, 16, 42, CW - 168];
-    var x = M, hh = 4;
-    ['ITEM', 'CHAPA', 'NOME'].forEach(function (t, i) { p.cell(t, x, p.y, widths[i], hh * 2, { bold: true, fill: GRAY }); x += widths[i]; });
-    p.cell('Marque (X) p/ Hora Extra', x, p.y, widths[3] + widths[4], hh, { bold: true, fill: GRAY, size: 6 });
-    p.cell('SIM', x, p.y + hh, widths[3], hh, { bold: true, fill: GRAY }); p.cell('NÃO', x + widths[3], p.y + hh, widths[4], hh, { bold: true, fill: GRAY });
-    x += widths[3] + widths[4];
-    p.cell('FUNÇÃO', x, p.y, widths[5], hh * 2, { bold: true, fill: GRAY }); p.cell('CONFIRMAÇÃO', x + widths[5], p.y, widths[6], hh * 2, { bold: true, fill: GRAY });
-    p.y += hh * 2;
-    var sel = {}; (h.pessoas || []).forEach(function (x) { sel[x.chapa] = 1; });
+    var lbl = function (t, x, y, w) { p.text(t, x, y, w, 3, { size: 5.8, align: 'left', top: true }); };
+    // cabeçalho: logo | título + obra | DATA (emissão)
+    var y = M;
+    p.box(M, y, 36, 15); if (opts.logo) { try { d.addImage(opts.logo, 'JPEG', M + 2, y + 3.5, 32, 8.2); } catch (e) { } }
+    p.box(M + 36, y, 112, 15);
+    p.text('PERMISSÃO PARA HORAS EXTRAS', M + 36, y + 1.5, 112, 6, { bold: true, size: 10 });
+    p.text(OBRA, M + 36, y + 7.5, 112, 6, { bold: true, size: 9 });
+    p.box(M + 148, y, CW - 148, 15); lbl('DATA:', M + 148, y, 20);
+    p.text(br(String(h.pedidoEm || '').slice(0, 10)), M + 148, y + 3, CW - 148, 12, { size: 12, color: BLUE });
+    y += 15;
+    // linha de identificação
+    var wi = [30, 52, 24, 38, CW - 144], li = ['Data da atividade:', 'Encarregado:', 'Turno:', 'Área:', 'Responsável:'];
+    var vi = [{ t: br(h.date), size: 10 }, { t: h.enc || '', size: 7 }, { t: h.turno || 'DIURNO', size: 8 }, { t: h.area || '', size: 6.8, wrap: true }, { t: h.supervisor || '', size: 6.8 }];
+    var x = M, ih = 10;
+    wi.forEach(function (w, k) { p.box(x, y, w, ih); lbl(li[k], x, y, w); p.text(vi[k].t, x, y + 3, w, ih - 3, { size: vi[k].size, wrap: vi[k].wrap, color: k === 0 || k === 2 || k === 3 ? BLUE : [0, 0, 0] }); x += w; });
+    y += ih;
+    // tabela de pessoas
+    var widths = [10, 12, 54, 32, 36, CW - 144], hh = 6, RH = 6.2;
+    var thead = function () {
+      p.cols(['ITEM', 'CHAPA', 'NOME', 'Marque (X) p/ Hora Extra', 'FUNÇÃO', 'ASSINATURA'], widths, p.y, hh, { bold: true, fill: GRAY, size: 6.3 }); p.y += hh;
+    };
+    p.y = y; thead();
+    var box = function (cx, cy, on) {
+      d.setLineWidth(0.25); d.setDrawColor(0); d.rect(cx, cy, 3, 3);
+      if (on) { d.setDrawColor(20, 40, 160); d.setLineWidth(0.5); d.line(cx + 0.4, cy + 0.4, cx + 2.6, cy + 2.6); d.line(cx + 2.6, cy + 0.4, cx + 0.4, cy + 2.6); d.setLineWidth(0.25); d.setDrawColor(0); }
+    };
+    var sel = {}; (h.pessoas || []).forEach(function (q) { sel[q.chapa] = 1; });
     var lista = (h.equipe && h.equipe.length ? h.equipe : h.pessoas || []).slice();
-    var naLista = {}; lista.forEach(function (x) { naLista[x.chapa] = 1; });
-    (h.pessoas || []).forEach(function (x) { if (!naLista[x.chapa]) { naLista[x.chapa] = 1; lista.push(Object.assign({}, x, { funcao: (x.funcao || '') + ' (adicionado)' })); } });
-    var n = Math.max(lista.length, 20);
+    var naLista = {}; lista.forEach(function (q) { naLista[q.chapa] = 1; });
+    (h.pessoas || []).forEach(function (q) { if (!naLista[q.chapa]) { naLista[q.chapa] = 1; lista.push(Object.assign({}, q, { funcao: (q.funcao || '') + ' (adicionado)' })); } });
+    var n = Math.max(lista.length, 25);
     for (var i = 0; i < n; i++) {
-      var t = lista[i] || {}, on = t.chapa && sel[t.chapa];
-      ensure(p, 5.2, { numero: h.id, date: h.date });
-      p.cols([i + 1, t.chapa || '-', { t: t.nome || '', align: 'left' }, { t: on ? 'X' : '', bold: true, size: 9, color: [20, 40, 160] }, { t: t.chapa && !on ? 'X' : '', bold: true, size: 9, color: [20, 40, 160] }, { t: t.funcao || '', align: 'left', size: 6.5 }, { t: on ? 'Decl. do encarregado' : '', size: 6 }], widths, p.y, 5.2, { size: 7 });
-      p.y += 5.2;
+      var t = lista[i] || {}, on = !!(t.chapa && sel[t.chapa]);
+      if (p.y + RH > BOT) { ensure(p, RH + 10, { numero: 'Permissão', date: h.date }); thead(); }
+      p.cols([i + 1, t.chapa || '-', { t: t.nome || '', size: 6.5 }, '', { t: t.funcao || '', size: 6 }, ''], widths, p.y, RH, { size: 6.8 });
+      var mx = M + widths[0] + widths[1] + widths[2], cy = p.y + (RH - 3) / 2;
+      box(mx + 3, cy, on); p.text('SIM', mx + 6.5, p.y, 8, RH, { size: 6, align: 'left' });
+      box(mx + 17, cy, t.chapa && !on); p.text('NÃO', mx + 20.5, p.y, 9, RH, { size: 6, align: 'left' });
+      p.y += RH;
     }
-    ensure(p, 40, { numero: h.id, date: h.date });
-    p.y += 3;
-    var half = CW / 2;
-    p.cols(['ENCARREGADO', 'APROVAÇÃO'], [half, half], p.y, 5, { bold: true, fill: GRAY }); p.y += 5;
-    p.cols(['', ''], [half, half], p.y, 26);
-    p.text('Declaro que combinei a hora extra com cada pessoa marcada e que todas concordaram.', M, p.y + 0.5, half, 7, { size: 6.3, wrap: true });
-    if (opts.assinatura) { try { doc.addImage(opts.assinatura, 'PNG', M + 10, p.y + 7, half - 20, 13); } catch (e) { } }
-    p.text(h.enc + (h.pedidoEm ? '  ·  enviado ' + br(String(h.pedidoEm).slice(0, 10)) + ' ' + String(h.pedidoEm).slice(11, 16) : ''), M, p.y + 20, half, 5, { size: 6.5 });
-    var st = h.status || 'PENDENTE', stc = st === 'APROVADO' ? [17, 96, 42] : st === 'REPROVADO' ? [190, 30, 30] : [90, 90, 90];
-    p.text(st, M + half, p.y + 3, half, 8, { bold: true, size: 13, color: stc });
-    p.text((h.decididoEm ? 'em ' + br(String(h.decididoEm).slice(0, 10)) + ' ' + String(h.decididoEm).slice(11, 16) : '') + (h.noPrazo === false ? '   ·   PEDIDO FORA DO PRAZO' : '   ·   pedido no prazo'), M + half, p.y + 11, half, 5, { size: 7, color: h.noPrazo === false ? [190, 30, 30] : [0, 0, 0] });
-    if (h.obsAdmin) p.text('Obs.: ' + h.obsAdmin, M + half, p.y + 16, half, 9, { size: 6.5, wrap: true });
-    p.y += 26;
-    pageFooter(doc, start, 'Pedido ' + h.id + '  ·  ' + h.enc);
+    // descrição dos serviços (linhas pautadas)
+    var tipo = h.tipo === 'ESCALA' ? 'Escala (dia não útil)' : 'Extensão de horário';
+    d.setFont('helvetica', 'normal'); d.setFontSize(8.5);
+    var txt = [tipo + '  ·  Horário: ' + (h.ini || '') + ' às ' + (h.fim || '')].concat(d.splitTextToSize(String(h.motivo || ''), CW - 6));
+    var LH = 6, nl = Math.max(6, txt.length);
+    ensure(p, 6 + nl * LH + 32, { numero: 'Permissão', date: h.date });
+    p.cell('Descrição dos serviços a serem executados:', M, p.y, CW, 5.5, { bold: true, size: 8.5 }); p.y += 5.5;
+    p.box(M, p.y, CW, nl * LH);
+    for (var k = 0; k < nl; k++) {
+      if (k) { d.setLineWidth(0.15); d.line(M, p.y + k * LH, M + CW, p.y + k * LH); d.setLineWidth(0.25); }
+      if (txt[k]) p.text(txt[k], M, p.y + k * LH, CW, LH, { align: 'left', size: 8.5, color: BLUE });
+    }
+    p.y += nl * LH;
+    // autorização
+    p.cell('Autorização', M, p.y, CW, 5, { bold: true, size: 8.5 }); p.y += 5;
+    var wa = [62, 66, CW - 128], la = ['Encarregado', 'Supervisor', 'Gerente Projeto'], ah = 24;
+    x = M; wa.forEach(function (w, k) { p.box(x, p.y, w, ah); lbl(la[k], x, p.y, w); x += w; });
+    if (opts.assinatura) { try { d.addImage(opts.assinatura, 'PNG', M + 6, p.y + 4, wa[0] - 12, 13); } catch (e) { } }
+    p.text(h.enc || '', M, p.y + ah - 5, wa[0], 4, { size: 6 });
+    p.y += ah;
+    var st = h.status || 'PENDENTE';
+    pageFooter(doc, start, 'Pedido ' + (h.id || '') + '  ·  ' + (h.enc || '') + '  ·  ' + st + (h.decididoEm ? ' em ' + br(String(h.decididoEm).slice(0, 10)) : '') + (h.noPrazo === false ? '  ·  FORA DO PRAZO' : '') + (h.obsAdmin ? '  ·  Obs.: ' + h.obsAdmin : ''));
     return doc;
   };
 
@@ -349,14 +369,16 @@
     var nAt = (r.atividades || []).length, nEq = (r.equipamentos || []).filter(function (e) { return e.d; }).length, nPa = (r.paralisacoes || []).filter(function (x) { return x.motivo; }).length;
     var other = muro ? (9 + Math.max(nEq, 5) * rh + 7 + Math.max(10, nAt + 8) * 5 + 9.5 + Math.max(nPa, 6) * 5 + 25)
       : (9 + Math.max(nEq, 4) * rh + 6 + Math.max(nAt, 4) * 11 + 9.5 + Math.max(nPa, 2) * 5 + 25);
+    if (r.branco) other = muro ? (9 + 6 * rh + 7 + 10 * 5 + 9.5 + 6 * 5 + 25) : (9 + 6 * rh + 6 + 6 * 11 + 9.5 + 4 * 5 + 25);
     var avail = BOT - p.y - 8 - other;
     var maxRows = muro ? 15 : 26;
     var minRows = Math.min(maxRows, Math.max((r.team || []).length, Math.floor(avail / rh)));
+    if (r.branco) minRows = Math.max(minRows, (r.team || []).length + 3);
     var widths = muro ? [12, 16, 64, 38, 32, 16, 16] : [10, 14, 64, 42, 16, 16, 32];
     teamTable(p, r, widths, minRows, rh, muro);
-    equipTable(p, r, muro ? 5 : 4, rh, ctx);
+    equipTable(p, r, r.branco ? 6 : (muro ? 5 : 4), rh, ctx);
     if (muro) muroAtivTable(p, r, ctx); else ativTable(p, r, ctx);
-    paralTable(p, r, ctx, muro, muro ? 6 : 2);
+    paralTable(p, r, ctx, muro, muro ? 6 : (r.branco ? 4 : 2));
     signBlock(p, r, opts.assinatura, ctx);
     if (r.armacao && r.armacao.length) { doc.addPage(); p.y = M; armPages(p, r, opts.logo); }
     photoPages(p, r, opts.fotos, ctx);
@@ -364,7 +386,7 @@
     var end = doc.getNumberOfPages();
     for (var i = startPage; i <= end; i++) {
       doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(90);
-      doc.text((r.numero || '') + '   ·   Enviado em ' + (r.enviadoEm || '') + '   ·   Página ' + (i - startPage + 1) + ' de ' + (end - startPage + 1), W / 2, H - 4, { align: 'center' });
+      doc.text((r.branco ? 'RDA em branco para preenchimento manual – equipe impressa em ' + (r.impressoEm || '') : (r.numero || '') + '   ·   Enviado em ' + (r.enviadoEm || '')) + '   ·   Página ' + (i - startPage + 1) + ' de ' + (end - startPage + 1), W / 2, H - 4, { align: 'center' });
     }
     doc.setPage(end);
     return doc;
