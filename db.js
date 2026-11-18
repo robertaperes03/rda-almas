@@ -37,6 +37,7 @@
           c.onsuccess = function () { var cur = c.result; if (cur) { out.push({ key: cur.key, value: cur.value }); cur.continue(); } };
           t.oncomplete = function () { res(out); };
           t.onerror = function () { rej(t.error); };
+          t.onabort = function () { rej(t.error || new Error('Leitura local interrompida')); };
         });
       });
     }
