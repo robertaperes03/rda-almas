@@ -254,12 +254,13 @@
   function exportar() {
     var el = document.getElementById('adm');
     el.innerHTML = '<div class="card"><div class="grid2"><div><label class="f" style="margin-top:0">De</label><input type="date" id="de" value="' + A.de + '"></div><div><label class="f" style="margin-top:0">Até</label><input type="date" id="ate" value="' + A.ate + '"></div></div>' +
-      '<div class="row" style="margin-top:12px"><button class="btn ok" id="xls">📊 Planilha (.xlsx)</button><button class="btn" id="pdfall">📄 PDF de todos</button></div><button class="btn block" id="pdfarm" style="margin-top:8px;background:#00695c">🔩 Montagem de armação (PDF)</button><button class="btn block ghost" id="quadro" style="margin-top:8px">👥 Quadro de equipes – último status (.xlsx)</button></div><div class="card" id="lst"><p class="empty">Carregando…</p></div>';
+      '<div class="row" style="margin-top:12px"><button class="btn ok" id="xls">📊 Planilha (.xlsx)</button><button class="btn" id="pdfall">📄 PDF de todos</button></div><button class="btn block" id="pdfarm" style="margin-top:8px;background:#00695c">🔩 Montagem de armação (PDF)</button><button class="btn block ghost" id="quadro" style="margin-top:8px">👥 Quadro de equipes – último status (.xlsx)</button><button class="btn block ghost" id="branco" style="margin-top:8px">🖨 RDA em branco para imprimir</button></div><div class="card" id="lst"><p class="empty">Carregando…</p></div>';
     document.getElementById('de').onchange = function () { A.de = this.value; if (A.ate < A.de) A.ate = A.de; exportar(); };
     document.getElementById('ate').onchange = function () { A.ate = this.value; exportar(); };
     document.getElementById('xls').onclick = planilha;
     document.getElementById('pdfall').onclick = function () { pdfMany(A.list || []); };
     document.getElementById('quadro').onclick = quadroEquipes;
+    document.getElementById('branco').onclick = rdaBranco;
     document.getElementById('pdfarm').onclick = function () { pdfMany((A.list || []).filter(function (r) { return r.armacao; }), true); };
     api('admin_list', { de: A.de, ate: A.ate }).then(function (j) {
       A.list = j.rdas.sort(function (a, b) { return (a.date + a.disciplina + a.enc).localeCompare(b.date + b.disciplina + b.enc); });
@@ -347,6 +348,49 @@
         }, Promise.resolve()).then(function () { busy('Finalizando arquivo…'); return doc.save((arm ? 'Montagem de armação ' : 'RDAs ') + A.de + (A.ate !== A.de ? ' a ' + A.ate : '') + '.pdf'); });
       });
     }).then(function () { done('PDF pronto ✓'); }).catch(function (e) { done('Erro: ' + e.message); });
+  }
+  // RDA em branco (nome, disciplina, supervisor e equipe atual impressos) para quem preenche à mão
+  function norm(t) { return String(t || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim(); }
+  function rdaBranco() {
+    busy('Carregando encarregados e equipes…');
+    api('admin_quadro', {}, 120000).then(function (j) {
+      document.getElementById('toast').classList.add('hidden');
+      var encs = j.encarregados || {}, eq = {};
+      j.pessoas.forEach(function (p) { if (p.enc && p.enc !== j.livre && p.enc !== 'DESLIGADO') (eq[p.enc] = eq[p.enc] || []).push(p); });
+      var nomes = Object.keys(encs).filter(function (n) { return encs[n].ativo !== false; }).sort();
+      var b = sheetUI('<h3>🖨 RDA em branco para imprimir</h3><p class="small muted">Para o encarregado que ainda preenche o RDA no papel. Sai com <b>nome, disciplina, supervisor e a equipe atual</b> já impressos; data, horários, status, clima, atividades, equipamentos, paralisações e assinatura ficam em branco, com linhas extras para quem entrar na equipe.</p>' +
+        '<label class="f">Buscar encarregado</label><input id="rbq" placeholder="Digite parte do nome">' +
+        '<div id="rbl" style="max-height:46vh;overflow:auto;margin-top:6px"></div>' +
+        '<label class="f">Folhas por encarregado</label><input type="number" id="rbn" min="1" max="31" value="1"><p class="small muted" style="margin-top:4px">Ex.: 6 para levar a semana toda impressa.</p>' +
+        '<button class="btn block" id="rbok" style="margin-top:10px">Gerar PDF</button><button class="btn block ghost" id="rbno" style="margin-top:8px">Cancelar</button>');
+      var sel = {};
+      var lista = function () {
+        var q = norm(b.querySelector('#rbq').value);
+        b.querySelector('#rbl').innerHTML = nomes.filter(function (n) { return !q || norm(n).indexOf(q) >= 0; }).map(function (n) {
+          return '<label class="person" style="cursor:pointer;padding:6px 0"><input type="checkbox" data-rb="' + esc(n) + '"' + (sel[n] ? ' checked' : '') + ' style="width:24px;height:24px;min-height:0;flex:0 0 24px"><div class="pinfo"><b style="font-size:15px">' + esc(n) + '</b><small>' + esc(encs[n].disciplina || '') + ' · ' + (eq[n] || []).length + ' pessoa(s)</small></div></label>';
+        }).join('') || '<p class="empty">Nenhum encarregado</p>';
+        [].forEach.call(b.querySelectorAll('[data-rb]'), function (c) { c.onchange = function () { sel[c.dataset.rb] = c.checked; }; });
+      };
+      b.querySelector('#rbq').oninput = lista; lista();
+      b.querySelector('#rbno').onclick = closeUI;
+      b.querySelector('#rbok').onclick = function () {
+        var es = nomes.filter(function (n) { return sel[n]; }), cop = Math.max(1, Math.min(31, parseInt(b.querySelector('#rbn').value, 10) || 1));
+        if (!es.length) return done('Marque pelo menos um encarregado');
+        closeUI(); busy('Gerando PDF…');
+        var agora = new Date(), hoje = ('0' + agora.getDate()).slice(-2) + '/' + ('0' + (agora.getMonth() + 1)).slice(-2) + '/' + agora.getFullYear();
+        prepPdf().then(function (logo) {
+          return window.newPdfDoc().then(function (doc) {
+            es.forEach(function (n) {
+              var e = encs[n], team = (eq[n] || []).slice().sort(function (a, c) { return String(a.nome).localeCompare(c.nome); })
+                .map(function (p) { return { chapa: p.chapa, nome: p.nome, funcao: p.funcao }; });
+              var r = { branco: true, impressoEm: hoje, date: '', enc: n, disciplina: e.disciplina || '', supervisor: e.supervisor || '', modelo: e.modelo || 'PADRAO', team: team, clima: {} };
+              for (var k = 0; k < cop; k++) window.buildRdaPdf(r, { logo: logo }, doc);
+            });
+            return doc.save('RDA em branco - ' + (es.length === 1 ? es[0] : es.length + ' encarregados') + '.pdf');
+          });
+        }).then(function () { done('PDF pronto ✓'); }).catch(function (e) { done('Erro: ' + e.message); });
+      };
+    }).catch(function (e) { done('Erro: ' + e.message); });
   }
   // todo o efetivo, por encarregado, com o último status informado no RDA
   function quadroEquipes() {
