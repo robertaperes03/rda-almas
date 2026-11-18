@@ -254,7 +254,7 @@
   function exportar() {
     var el = document.getElementById('adm');
     el.innerHTML = '<div class="card"><div class="grid2"><div><label class="f" style="margin-top:0">De</label><input type="date" id="de" value="' + A.de + '"></div><div><label class="f" style="margin-top:0">Até</label><input type="date" id="ate" value="' + A.ate + '"></div></div>' +
-      '<div class="row" style="margin-top:12px"><button class="btn ok" id="xls">📊 Planilha (.xlsx)</button><button class="btn" id="pdfall">📄 PDF de todos</button></div><button class="btn block" id="pdfarm" style="margin-top:8px;background:#00695c">🔩 Montagem de armação (PDF)</button><button class="btn block ghost" id="quadro" style="margin-top:8px">👥 Quadro de equipes – último status (.xlsx)</button><button class="btn block ghost" id="branco" style="margin-top:8px">🖨 RDA em branco para imprimir</button></div><div class="card" id="lst"><p class="empty">Carregando…</p></div>';
+      '<div class="row" style="margin-top:12px"><button class="btn ok" id="xls">📊 Planilha (.xlsx)</button><button class="btn" id="pdfall">📄 PDF de todos</button></div><button class="btn block" id="pdfarm" style="margin-top:8px;background:#00695c">🔩 Montagem de armação (PDF)</button><button class="btn block ghost" id="quadro" style="margin-top:8px">👥 Quadro de equipes – último status (.xlsx)</button><button class="btn block ghost" id="branco" style="margin-top:8px">🖨 Em branco para imprimir (RDA e escala de hora extra)</button></div><div class="card" id="lst"><p class="empty">Carregando…</p></div>';
     document.getElementById('de').onchange = function () { A.de = this.value; if (A.ate < A.de) A.ate = A.de; exportar(); };
     document.getElementById('ate').onchange = function () { A.ate = this.value; exportar(); };
     document.getElementById('xls').onclick = planilha;
@@ -358,7 +358,8 @@
       var encs = j.encarregados || {}, eq = {};
       j.pessoas.forEach(function (p) { if (p.enc && p.enc !== j.livre && p.enc !== 'DESLIGADO') (eq[p.enc] = eq[p.enc] || []).push(p); });
       var nomes = Object.keys(encs).filter(function (n) { return encs[n].ativo !== false; }).sort();
-      var b = sheetUI('<h3>🖨 RDA em branco para imprimir</h3><p class="small muted">Para o encarregado que ainda preenche o RDA no papel. Sai com <b>nome, disciplina, supervisor e a equipe atual</b> já impressos; data, horários, status, clima, atividades, equipamentos, paralisações e assinatura ficam em branco, com linhas extras para quem entrar na equipe.</p>' +
+      var b = sheetUI('<h3>🖨 Em branco para imprimir</h3><p class="small muted">Para o encarregado que ainda preenche no papel. Sai com <b>nome, supervisor e a equipe atual</b> já impressos (o encarregado em primeiro) e o resto em branco, numa folha só.</p>' +
+        '<label class="f">O que imprimir</label><select id="rbt"><option value="rda">RDA em branco</option><option value="he">Escala / permissão de hora extra em branco</option><option value="ambos">Os dois</option></select>' +
         '<label class="f">Buscar encarregado</label><input id="rbq" placeholder="Digite parte do nome">' +
         '<div id="rbl" style="max-height:46vh;overflow:auto;margin-top:6px"></div>' +
         '<label class="f">Folhas por encarregado</label><input type="number" id="rbn" min="1" max="31" value="1"><p class="small muted" style="margin-top:4px">Ex.: 6 para levar a semana toda impressa.</p>' +
@@ -374,19 +375,26 @@
       b.querySelector('#rbq').oninput = lista; lista();
       b.querySelector('#rbno').onclick = closeUI;
       b.querySelector('#rbok').onclick = function () {
-        var es = nomes.filter(function (n) { return sel[n]; }), cop = Math.max(1, Math.min(31, parseInt(b.querySelector('#rbn').value, 10) || 1));
+        var tipo = b.querySelector('#rbt').value, es = nomes.filter(function (n) { return sel[n]; }), cop = Math.max(1, Math.min(31, parseInt(b.querySelector('#rbn').value, 10) || 1));
         if (!es.length) return done('Marque pelo menos um encarregado');
         closeUI(); busy('Gerando PDF…');
         var agora = new Date(), hoje = ('0' + agora.getDate()).slice(-2) + '/' + ('0' + (agora.getMonth() + 1)).slice(-2) + '/' + agora.getFullYear();
         prepPdf().then(function (logo) {
           return window.newPdfDoc().then(function (doc) {
             es.forEach(function (n) {
-              var e = encs[n], team = (eq[n] || []).slice().sort(function (a, c) { return String(a.nome).localeCompare(c.nome); })
+              var e = encs[n], tk = norm(n).split(/\s+/);
+              // o encarregado vem sempre em primeiro (nome igual ou com todos os nomes do cadastro); depois quem tem função de encarregado; depois A-Z
+              var rank = function (p) { var pn = norm(p.nome); if (pn === norm(n) || tk.every(function (w) { return (' ' + pn + ' ').indexOf(' ' + w + ' ') >= 0; })) return 0; return /ENCARREG/.test(norm(p.funcao)) ? 1 : 2; };
+              var team = (eq[n] || []).slice().sort(function (a, c) { return rank(a) - rank(c) || String(a.nome).localeCompare(c.nome); })
                 .map(function (p) { return { chapa: p.chapa, nome: p.nome, funcao: p.funcao }; });
               var r = { branco: true, impressoEm: hoje, date: '', enc: n, disciplina: e.disciplina || '', supervisor: e.supervisor || '', modelo: e.modelo || 'PADRAO', team: team, clima: {} };
-              for (var k = 0; k < cop; k++) window.buildRdaPdf(r, { logo: logo }, doc);
+              var hp = { branco: true, impressoEm: hoje, enc: n, supervisor: e.supervisor || '', equipe: team, pessoas: [] };
+              for (var k = 0; k < cop; k++) {
+                if (tipo !== 'he') window.buildRdaPdf(JSON.parse(JSON.stringify(r)), { logo: logo }, doc);
+                if (tipo !== 'rda') window.buildPermissaoPdf(hp, { logo: logo }, doc);
+              }
             });
-            return doc.save('RDA em branco - ' + (es.length === 1 ? es[0] : es.length + ' encarregados') + '.pdf');
+            return doc.save((tipo === 'he' ? 'Escala HE em branco - ' : tipo === 'ambos' ? 'RDA e escala HE em branco - ' : 'RDA em branco - ') + (es.length === 1 ? es[0] : es.length + ' encarregados') + '.pdf');
           });
         }).then(function () { done('PDF pronto ✓'); }).catch(function (e) { done('Erro: ' + e.message); });
       };
