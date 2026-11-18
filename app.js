@@ -14,6 +14,7 @@
     { s: '12X36', w: false, c: '#00796b' }, { s: 'VERIFICAR', w: false, c: '#f9a825' }];
 
   var PREMARCA = ['FÉRIAS', 'ATESTADO', 'AFASTADO INSS', 'FOLGA DE CAMPO'];
+  window.APP_V = 'v20';
   var S = { boot: null, me: null, key: '', draft: null, syncing: false, online: navigator.onLine, pending: 0, saveT: null };
   var $app = document.getElementById('app');
 
@@ -60,7 +61,7 @@
   function setPill() {
     var p = document.getElementById('syncpill'), t = document.getElementById('synctext');
     p.className = 'pill ' + (S.syncing ? 'busy' : (S.online ? 'on' : 'off'));
-    if (S.syncing) t.textContent = 'Enviando…';
+    if (S.syncing) t.textContent = S.syncStep ? 'Enviando ' + S.syncStep + '…' : 'Enviando…';
     else if (S.pending) t.textContent = (S.online ? '' : 'Sem internet · ') + S.pending + ' para enviar';
     else t.textContent = S.online ? 'Tudo enviado' : 'Sem internet';
   }
@@ -167,45 +168,82 @@
   }
 
   function sync() {
+    // trava de segurança: se um envio ficou preso (celular suspendeu, rede caiu no meio), libera depois de 8 min
+    if (S.syncing && Date.now() - (S.syncIni || 0) > 480000) { relataErro('travado', new Error('Envio preso há mais de 8 min em: ' + (S.syncStep || 'início'))); S.syncing = false; }
     if (S.syncing || !navigator.onLine || !CFG.API_URL || !S.key) return Promise.resolve();
-    S.syncing = true; setPill();
+    S.syncing = true; S.syncIni = Date.now(); S.syncStep = ''; setPill();
     return DB.all('queue').then(function (q) {
       q.sort(function (a, b) { return a.value.ts - b.value.ts; });
       var chain = Promise.resolve();
       q.forEach(function (it) {
         chain = chain.then(function () {
           var op = it.value;
+          S.syncStep = op.type === 'team' ? 'mudança de equipe' : op.type === 'he' ? 'hora extra' : ''; setPill();
           var job = op.type === 'team' ? api('teamChange', { enc: op.enc, changes: op.changes }) : op.type === 'he' ? sendHe(op.heId) : sendRda(op.draftId);
           return job.then(function () { return DB.del('queue', it.key); });
         });
       });
       return chain;
     }).then(function () { return refreshBoot(); }).then(function () { return refreshInbox(); })
-      .catch(function (e) { console.warn('sync', e); if (!/servidor/.test(e.message)) S.online = navigator.onLine; })
-      .then(function () { S.syncing = false; return countPending(); })
+      .catch(function (e) { console.warn('sync', e); relataErro(S.syncStep || 'sincronizar', e); if (!/servidor/.test(e.message)) S.online = navigator.onLine; })
+      .then(function () { S.syncing = false; S.syncStep = ''; return countPending(); })
       .then(function () { if (S.draft) { DB.get('drafts', S.draft.id).then(function (d) { if (d && S.draft && d.id === S.draft.id) { S.draft.state = d.state; S.draft.numero = d.numero; S.draft.enviadoEm = d.enviadoEm; updateHeadState(); } }); } });
   }
 
+  // avisa a administração (aba LOG_ERROS) quando o envio falha no celular – mensagem pequena, passa mesmo com sinal fraco
+  function relataErro(etapa, e) {
+    try {
+      var msg = String((e && (e.name === 'AbortError' ? 'Tempo esgotado (internet lenta ou caiu)' : e.message)) || e || ''), k = etapa + '|' + msg;
+      if (!S.me || !navigator.onLine || (S.relatados || {})[k] > Date.now() - 600000) return;
+      (S.relatados = S.relatados || {})[k] = Date.now();
+      var c = navigator.connection || {}, dur = S.syncIni ? Math.round((Date.now() - S.syncIni) / 1000) + 's' : '';
+      var det = [S.draft ? 'RDA ' + S.draft.date + ' (' + S.draft.state + ')' : '', 'fila ' + (S.pending || 0), 'tempo ' + dur, c.effectiveType ? 'rede ' + c.effectiveType + (c.downlink ? ' ' + c.downlink + 'Mbps' : '') : '', 'app ' + (window.APP_V || ''), navigator.userAgent.replace(/^Mozilla\/5\.0 /, '').slice(0, 160)].filter(Boolean).join(' · ');
+      api('clientLog', { enc: S.me.nome, date: S.draft ? S.draft.date : '', etapa: etapa, erro: msg, detalhe: det }, 15000).catch(function () { });
+    } catch (x) { }
+  }
+  // foto grande demais para internet fraca: reduz só a cópia que vai para o servidor
+  function fotoEnvio(data) {
+    if (!data || data.length < 450000) return Promise.resolve(data);
+    return new Promise(function (res) {
+      var im = new Image();
+      im.onload = function () {
+        try {
+          var k = Math.min(1, 1280 / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement('canvas');
+          c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+          c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+          var o = c.toDataURL('image/jpeg', 0.7); res(o.length < data.length ? o : data);
+        } catch (e) { res(data); }
+      };
+      im.onerror = function () { res(data); };
+      im.src = data;
+    });
+  }
   function photoFileName(d, ativIdx, seq) {
     return d.date + ' - ' + norm(d.disciplina) + ' - ' + norm(d.curto) + ' - Ativ ' + (ativIdx + 1) + ' - ' + p2(seq + 1) + '.jpg';
   }
   function sendRda(draftId) {
     return DB.get('drafts', draftId).then(function (d) {
       if (!d) return;
-      var jobs = [];
+      var jobs = [], nf = 0, kf = 0;
+      d.atividades.forEach(function (a) { nf += (a.fotos || []).length; });
       d.atividades.forEach(function (a, ai) {
         (a.fotos || []).forEach(function (pid, pi) {
           jobs.push(function () {
+            S.syncStep = 'foto ' + (++kf) + ' de ' + nf; setPill();
             return DB.get('photos', pid).then(function (ph) {
               if (!ph || ph.fileId) return;
               var name = photoFileName(d, ai, pi);
-              return api('uploadPhoto', { id: pid, rdaId: d.id, rdaNum: d.numero, date: d.date, enc: d.enc, disc: d.disciplina, ativ: 'Ativ ' + (ai + 1) + ' - ' + (a.desc || ''), fileName: name, takenAt: ph.takenAt, data: ph.data }, 120000)
+              return fotoEnvio(ph.data).then(function (dados) {
+                S.syncStep = 'foto ' + kf + ' de ' + nf + ' (' + Math.round(dados.length * 0.75 / 1024) + ' KB)'; setPill();
+                return api('uploadPhoto', { id: pid, rdaId: d.id, rdaNum: d.numero, date: d.date, enc: d.enc, disc: d.disciplina, ativ: 'Ativ ' + (ai + 1) + ' - ' + (a.desc || ''), fileName: name, takenAt: ph.takenAt, data: dados }, Math.min(300000, 60000 + dados.length / 1000 * 300));
+              })
                 .then(function (r) { ph.fileId = r.fileId; ph.url = r.url; ph.fileName = name; return DB.put('photos', pid, ph); });
             });
           });
         });
       });
       if (d.assinatura) jobs.push(function () {
+        S.syncStep = 'assinatura'; setPill();
         return DB.get('photos', d.assinatura).then(function (ph) {
           if (!ph || ph.fileId) return;
           var name = d.date + ' - ' + norm(d.disciplina) + ' - ' + norm(d.curto) + ' - ASSINATURA.png';
@@ -214,7 +252,7 @@
         });
       });
       return jobs.reduce(function (c, j) { return c.then(j); }, Promise.resolve()).then(function () { return payload(d); })
-        .then(function (pl) { return api('submitRda', { rda: pl }, 90000); })
+        .then(function (pl) { S.syncStep = 'RDA ' + String(d.date).split('-').reverse().slice(0, 2).join('/'); setPill(); return api('submitRda', { rda: pl }, 90000); })
         .then(function (r) {
           return DB.get('drafts', draftId).then(function (cur) {
             cur = cur || d;
