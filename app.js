@@ -10,8 +10,10 @@
     { s: 'PRESENTE', w: true, c: '#1e8e3e' }, { s: 'FALTA', w: false, c: '#d93025' }, { s: 'ATESTADO', w: false, c: '#e8710a' },
     { s: 'FÉRIAS', w: false, c: '#1a73e8' }, { s: 'FOLGA', w: false, c: '#5f6368' }, { s: 'FOLGA DE CAMPO', w: false, c: '#80868b' },
     { s: 'TREINAMENTO', w: true, c: '#9334e6' }, { s: 'SERVIÇO EXTERNO', w: true, c: '#129eaf' }, { s: 'EXAME PERIÓDICO', w: false, c: '#b06000' },
-    { s: 'AFASTADO INSS', w: false, c: '#a50e0e' }, { s: 'DEMITIDO', w: false, c: '#202124' }];
+    { s: 'AFASTADO INSS', w: false, c: '#a50e0e' }, { s: 'DEMITIDO', w: false, c: '#202124' },
+    { s: '12X36', w: false, c: '#00796b' }, { s: 'VERIFICAR', w: false, c: '#f9a825' }];
 
+  var PREMARCA = ['FÉRIAS', 'ATESTADO', 'AFASTADO INSS', 'FOLGA DE CAMPO'];
   var S = { boot: null, me: null, key: '', draft: null, syncing: false, online: navigator.onLine, pending: 0, saveT: null };
   var $app = document.getElementById('app');
 
@@ -320,9 +322,14 @@
           modelo: S.me.modelo || 'PADRAO', clima: { dia: '', tarde: '', noite: '' }, chuvaIni: '', chuvaFim: '', periodo: h.ini + ' AS ' + h.fim,
           team: myTeam().map(function (p) {
             var st = prevSt[p.chapa] || p.st || 'PRESENTE';
+            // efetivo diário nominal do RH (só quando a planilha do próprio dia já foi importada)
+            var nom = ((S.boot.nominal || {})[date] || {})[p.chapa];
+            if (nom && nom !== 'PRESENTE') st = nom;
+            else if (nom === 'PRESENTE' && PREMARCA.indexOf(st) >= 0) st = 'PRESENTE';
             if (!statusList().some(function (x) { return x.s === st; })) st = 'PRESENTE';
-            var w = stInfo(st).w;
-            return { chapa: p.chapa, nome: p.nome, funcao: p.funcao, status: st, inicio: w ? h.ini : '', termino: w ? h.fim : '', custom: false };
+            var w = stInfo(st).w, o = { chapa: p.chapa, nome: p.nome, funcao: p.funcao, status: st, inicio: w ? h.ini : '', termino: w ? h.fim : '', custom: false };
+            if (nom && nom === st && nom !== 'PRESENTE') o.rh = st;
+            return o;
           }),
           atividades: [], equipamentos: [], paralisacoes: [], assinatura: '', state: 'rascunho', createdAt: Date.now(), updatedAt: Date.now(),
           preenchidoPor: S.cover ? S.cover.nome : ((folgaHoje(S.me.nome, date) || {}).tipo === 'MEMBRO' ? folgaHoje(S.me.nome, date).subst : '')
@@ -405,7 +412,7 @@
     h += '<p class="small muted" style="margin:0 0 6px">Toque no status para mudar. O horário entra sozinho; toque nele para ajustar.</p>';
     d.team.forEach(function (t, i) {
       var si = stInfo(t.status);
-      h += '<div class="person"><div class="pinfo"><b>' + esc(t.nome) + '</b><small>' + esc(t.chapa) + ' · ' + esc(t.funcao) + '</small>' +
+      h += '<div class="person"><div class="pinfo"><b>' + esc(t.nome) + '</b><small>' + esc(t.chapa) + ' · ' + esc(t.funcao) + '</small>' + (t.rh && t.rh === t.status ? '<small style="color:#1a73e8">📋 marcado conforme o efetivo do RH</small>' : '') +
         (si.w ? '<div><button class="hrs' + (t.custom ? ' custom' : '') + '" data-h="' + i + '">🕒 ' + esc(t.inicio || '--:--') + ' – ' + esc(t.termino || '--:--') + (t.custom ? ' ✎' : '') + '</button></div>' : '') +
         '</div><button class="stbtn" data-s="' + i + '" style="background:' + si.c + '">' + esc(t.status) + '</button>' +
         (isMe(t.nome) ? '<span style="width:36px"></span>' : '<button class="rm" data-r="' + i + '" title="Remover da equipe">✕</button>') + '</div>';
