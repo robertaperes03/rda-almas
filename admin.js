@@ -53,11 +53,12 @@
     var esc = (j.escalas || {})[e.nome + '|' + d];
     var fo = (j.folgas || []).filter(function (f) { return f.enc === e.nome && d >= f.ini && d <= f.fim; })[0];
     var sit = ov ? ov.s : (fo && !fo.subst ? 'FOLGA DE CAMPO' : diaUtil(d, j) || esc ? 'TRABALHO NORMAL' : dow(d) === 0 ? 'DOMINGO / DSR' : j.feriados.indexOf(d) >= 0 ? 'FERIADO' : 'SEM ESCALA');
-    if (!e.cobra && !ov) sit = 'NÃO TEM RDA';
+    if (!e.cobra && !e.papel && !ov) sit = 'NÃO TEM RDA';
     else if (!ov && !r && j.inicio && d < j.inicio && sit === 'TRABALHO NORMAL') sit = 'ENTREGUE EM PAPEL';
     var cobra = (j.listaSituacoes.filter(function (x) { return x[0] === sit; })[0] || [sit, true])[1];
     var prazo = prazoDe(e, d, j), agora = j.agora || (today() + ' 23:59');
     var out = { rda: r, sit: sit, obs: ov ? ov.o : (fo ? 'Folga de campo ' + br(fo.ini).slice(0, 5) + '–' + br(fo.fim).slice(0, 5) + (fo.subst ? ', RDA por ' + fo.subst : '') : ''), cobra: cobra || !!r, prevista: prazo.slice(0, 10), prazo: prazo, numero: r ? r.numero : numero(e, d) };
+    if (!r && ov && ov.s === 'ENTREGUE EM PAPEL' && e.papel) { out.pap = true; out.cobra = true; out.status = 'Concluído'; out.atraso = 0; out.obs = ov.o || 'RDA em papel recebido'; return out; } // RDA em papel recebido conta como entregue
     if (!r) { // o encarregado consta no RDA de outro encarregado: conta como feito
       var outro = j.rdas.filter(function (x) {
         return x.date === d && x.enc !== e.nome && (x.membros || []).some(function (m) { return (m[0] === e.nome || m[0].indexOf(e.nome + ' ') === 0) && (!m[1] || stOk(m[1])); });
@@ -194,26 +195,27 @@
   function entregas() {
     var el = document.getElementById('adm');
     el.innerHTML = '<div class="card"><div class="row" style="align-items:end;flex-wrap:wrap"><div><label class="f" style="margin-top:0">Até o dia</label><input type="date" id="dd" value="' + A.date + '"></div>' +
-      '<div><label class="f" style="margin-top:0">Período</label><select id="per"><option value="7">7 dias</option><option value="15">15 dias</option><option value="31">31 dias</option></select></div></div>' +
-      '<label class="chk"><input type="checkbox" id="todos"' + (A.todos ? ' checked' : '') + '> Mostrar também quem não entrega RDA</label><button class="btn sm ghost" id="quem" style="margin-top:8px">👷 Quem faz RDA (recebe cobrança e alertas)</button></div><div id="ent"><p class="empty">Carregando…</p></div>';
+      '<div><label class="f" style="margin-top:0">Período</label><select id="per"><option value="1">Só o dia</option><option value="7">7 dias</option><option value="15">15 dias</option><option value="31">31 dias</option></select></div></div>' +
+      '<label class="chk"><input type="checkbox" id="todos"' + (A.todos ? ' checked' : '') + '> Mostrar também quem não entrega RDA</label><div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm ghost" id="quem">👷 Quem faz RDA</button><button class="btn sm" id="qimg">🖼 Imagem do quadro (para cobrar)</button></div></div><div id="ent"><p class="empty">Carregando…</p></div>';
     document.getElementById('per').value = String(A.dias);
     document.getElementById('dd').onchange = function () { A.date = this.value; entregas(); };
     document.getElementById('per').onchange = function () { A.dias = +this.value; entregas(); };
     document.getElementById('todos').onchange = function () { A.todos = this.checked; entregas(); };
     document.getElementById('quem').onclick = quemFaz;
+    document.getElementById('qimg').onclick = function () { done('Aguarde o quadro carregar'); };
     var de = addDays(A.date, -(A.dias - 1));
     loadControle(de, A.date).then(function (j) {
       var days = []; for (var i = A.dias - 1; i >= 0; i--) days.push(addDays(A.date, -i));
-      var encs = j.encarregados.filter(function (e) { return A.todos || e.cobra; });
+      var encs = j.encarregados.filter(function (e) { return A.todos || e.cobra || e.papel; });
       var hoje = encs.map(function (e) { return { e: e, c: controle(j, e, A.date) }; });
-      var prevDia = hoje.filter(function (x) { return x.c.cobra; }).length, entDia = hoje.filter(function (x) { return x.c.rda || x.c.via; }).length;
+      var prevDia = hoje.filter(function (x) { return x.c.cobra; }).length, entDia = hoje.filter(function (x) { return x.c.rda || x.c.via || x.c.pap; }).length;
       var prevP = 0, entP = 0, porEnc = {};
-      encs.forEach(function (e) { var s = porEnc[e.nome] = { p: 0, e: 0, at: 0 }; days.forEach(function (d) { var c = controle(j, e, d); if (c.cobra) { s.p++; prevP++; } if (c.rda || c.via) { s.e++; entP++; if (c.atraso) s.at++; } }); });
+      encs.forEach(function (e) { var s = porEnc[e.nome] = { p: 0, e: 0, at: 0 }; days.forEach(function (d) { var c = controle(j, e, d); if (c.cobra) { s.p++; prevP++; } if (c.rda || c.via || c.pap) { s.e++; entP++; if (c.atraso) s.at++; } }); });
       var h = '<div class="kpis"><div><b>' + entDia + '/' + prevDia + '</b><small>entregues em ' + br(A.date).slice(0, 5) + '</small></div><div><b>' + entP + '/' + prevP + '</b><small>no período</small></div><div><b>' + Math.round(entP * 100 / Math.max(1, prevP)) + '%</b><small>aderência</small></div></div>';
       var pend = [];
       encs.forEach(function (e) { days.forEach(function (d) { var c = controle(j, e, d); if (c.status === 'Pendente') pend.push({ e: e, d: d, c: c }); }); });
       var line = function (x) {
-        return '<div class="rdaline"><div class="tx"><b>' + esc(x.e.curto || x.e.nome) + ' · ' + br(x.d) + '</b><small>' + esc(x.c.numero) + ' · prazo ' + br(x.c.prevista).slice(0, 5) + ' 12:00' + (x.c.atraso ? ' · <b style="color:var(--bad)">' + x.c.atraso + ' dia(s) de atraso</b>' : '') + '</small></div><button class="btn sm ghost" data-sit="' + esc(x.e.nome) + '|' + x.d + '">Situação</button></div>';
+        return '<div class="rdaline"><div class="tx"><b>' + esc(x.e.curto || x.e.nome) + ' · ' + br(x.d) + '</b><small>' + esc(x.c.numero) + ' · prazo ' + br(x.c.prevista).slice(0, 5) + ' 12:00' + (x.c.atraso ? ' · <b style="color:var(--bad)">' + x.c.atraso + ' dia(s) de atraso</b>' : '') + '</small></div>' + (x.e.papel ? '<button class="btn sm ok" data-pap="' + esc(x.e.nome) + '|' + x.d + '">✓ Recebi</button>' : '') + '<button class="btn sm ghost" data-sit="' + esc(x.e.nome) + '|' + x.d + '">Situação</button></div>';
       };
       var pDia = pend.filter(function (x) { return x.d === A.date; }), pAnt = pend.filter(function (x) { return x.d !== A.date; }).reverse();
       h += '<div class="card"><div class="card-h"><h2>Pendentes de ' + br(A.date) + ' (' + pDia.length + ')</h2></div>' + (pDia.length ? pDia.map(line).join('') : '<p class="empty">Ninguém pendente neste dia ✓</p>') +
@@ -225,6 +227,7 @@
           var c = controle(j, e, d), key = esc(e.nome) + '|' + d;
           if (c.via) return '<td class="ok" data-id="' + esc(c.via.id) + '" title="' + esc(c.obs) + '" style="background:#e3f2fd;color:#0b4f9c">✓<br><small>' + esc((c.via.enc || '').split(' ')[0]) + '</small></td>';
           if (c.rda) return '<td class="ok" data-id="' + esc(c.rda.id) + '" title="' + esc(c.numero) + '"' + (c.atraso ? ' style="background:#fff1e6;color:#a34600"' : '') + '>✓' + (c.atraso ? '<br><small>+' + c.atraso + 'd</small>' : '') + '</td>';
+          if (c.pap) return '<td class="ok" data-sit="' + key + '" title="Recebido">✓</td>';
           if (c.status === 'Pendente') return '<td class="pend" data-sit="' + key + '" title="' + esc(c.sit) + '">✗</td>';
           if (c.status === 'No prazo') return '<td data-sit="' + key + '" style="background:#fff8e1;color:#a36b00;font-weight:700" title="Prazo ' + esc(br(c.prazo.slice(0, 10)) + ' 12:00') + '">…</td>';
           return '<td class="na" data-sit="' + key + '" title="' + esc(c.sit + (c.obs ? ' – ' + c.obs : '')) + '"><small>' + esc(ABREV[c.sit] || c.sit.slice(0, 3)) + '</small></td>';
@@ -232,14 +235,73 @@
       });
       h += '</tbody></table></div><p class="small muted">✓ entregue (toque para o PDF; laranja = entregue com atraso; azul = consta no RDA de outro encarregado) · … ainda no prazo (até 12:00 do próximo dia de atividade) · ✗ atrasado · siglas = situação que não cobra RDA (DSR, FER, F.C = folga de campo, PAR, CHU, N/T = não tem RDA, PAP = entregue em papel, antes da cobrança pelo app…). Toque num dia sem RDA para mudar a situação.</p></div>';
       document.getElementById('ent').innerHTML = h;
+      document.getElementById('qimg').onclick = function () { quadroImagem(j, encs, days, pend); };
+      [].forEach.call(document.querySelectorAll('[data-pap]'), function (bt) { bt.onclick = function (ev) { ev.stopPropagation(); var k = bt.dataset.pap.split('|'); busy('Salvando…'); api('admin_setSituacao', { enc: k[0], date: k[1], situacao: 'ENTREGUE EM PAPEL', obs: 'RDA em papel recebido' }).then(function () { done('Recebido em papel ✓'); entregas(); }).catch(function (er) { done('Erro: ' + er.message); }); }; });
       [].forEach.call(document.querySelectorAll('td.ok'), function (td) { td.onclick = function () { pdfOne(td.dataset.id); }; });
       [].forEach.call(document.querySelectorAll('[data-sit]'), function (td) { td.onclick = function () { var k = td.dataset.sit.split('|'); situacao(j, k[0], k[1]); }; });
     }).catch(function (e) { document.getElementById('ent').innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
   }
+  // imagem do mapa de recebimento para mandar no grupo cobrando quem está pendente
+  function quadroImagem(j, encs, days, pend) {
+    var S2 = 2, nmW = 250, enW = 90, dW = days.length === 1 ? 230 : 62, rH = 40, top = 118, W = nmW + enW + dW * days.length + 40;
+    var pendTxt = {}; pend.forEach(function (x) { (pendTxt[x.e.curto || x.e.nome] = pendTxt[x.e.curto || x.e.nome] || []).push(br(x.d).slice(0, 5)); });
+    var pk = Object.keys(pendTxt).sort(), pendLines = [];
+    var cv = document.createElement('canvas'), g = cv.getContext('2d');
+    g.font = '15px Arial';
+    var cur = 'Pendentes: ';
+    pk.forEach(function (k) { var t = k + ' (' + pendTxt[k].join(', ') + ')'; var nxt = cur + (cur === 'Pendentes: ' || cur === '' ? '' : ' · ') + t; if (g.measureText(nxt).width > W - 40 && cur && cur !== 'Pendentes: ') { pendLines.push(cur); cur = t; } else cur = nxt; });
+    pendLines.push(pk.length ? cur : 'Ninguém pendente ✓');
+    var H = top + 34 + encs.length * rH + 30 + pendLines.length * 22 + 70;
+    cv.width = W * S2; cv.height = H * S2; g = cv.getContext('2d'); g.scale(S2, S2);
+    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#0b2a5b'; g.fillRect(0, 0, W, 64);
+    g.fillStyle = '#fff'; g.font = 'bold 21px Arial'; g.textBaseline = 'middle';
+    g.fillText('Recebimento de RDA – ' + (days.length === 1 ? DIAS_EXT[dow(days[0])] + ', ' + br(days[0]) : br(days[0]).slice(0, 5) + ' a ' + br(days[days.length - 1])), 20, 25);
+    g.font = '13px Arial'; g.fillText('PABH 059 25 · Projeto Almas – Britagem · gerado em ' + br(today()) + ' ' + new Date().toTimeString().slice(0, 5), 20, 48);
+    var prev = 0, ent = 0; encs.forEach(function (e) { days.forEach(function (d) { var c = controle(j, e, d); if (c.cobra) prev++; if (c.rda || c.via || c.pap) ent++; }); });
+    g.fillStyle = '#202124'; g.font = 'bold 15px Arial';
+    g.fillText('Entregues: ' + ent + ' de ' + prev + '  ·  Aderência: ' + Math.round(ent * 100 / Math.max(1, prev)) + '%  ·  Pendentes: ' + pend.length, 20, 90);
+    var x0 = 20, y = top;
+    var cell = function (x, y2, w, txt, bg, fg, bold, al) {
+      g.fillStyle = bg; g.fillRect(x, y2, w, rH); g.strokeStyle = '#dadce0'; g.lineWidth = 1; g.strokeRect(x + .5, y2 + .5, w, rH);
+      g.fillStyle = fg; g.font = (bold ? 'bold ' : '') + '14px Arial'; g.textAlign = al || 'center'; g.fillText(txt, al === 'left' ? x + 10 : x + w / 2, y2 + rH / 2); g.textAlign = 'left';
+    };
+    cell(x0, y, nmW, 'Encarregado', '#eef1f6', '#0b2a5b', true, 'left'); cell(x0 + nmW, y, enW, 'Entregue', '#eef1f6', '#0b2a5b', true);
+    days.forEach(function (d, i) { cell(x0 + nmW + enW + i * dW, y, dW, (days.length === 1 ? DIAS[dow(d)] + ' ' : '') + br(d).slice(0, 5), '#eef1f6', '#0b2a5b', true); });
+    y += rH;
+    encs.forEach(function (e) {
+      var pe = 0, en = 0;
+      days.forEach(function (d) { var c = controle(j, e, d); if (c.cobra) pe++; if (c.rda || c.via || c.pap) en++; });
+      cell(x0, y, nmW, e.curto || e.nome, '#fff', '#202124', true, 'left');
+      cell(x0 + nmW, y, enW, en + '/' + pe, '#fff', en < pe ? '#d93025' : '#1e8e3e', true);
+      days.forEach(function (d, i) {
+        var c = controle(j, e, d), x = x0 + nmW + enW + i * dW, one = days.length === 1;
+        if (c.via) cell(x, y, dW, one ? '✓ no RDA de ' + (c.via.enc || '').split(' ')[0] : '✓', '#e3f2fd', '#0b4f9c', true);
+        else if (c.rda) cell(x, y, dW, c.atraso ? '✓ +' + c.atraso + 'd' : (one ? '✓ Entregue' : '✓'), c.atraso ? '#fff1e6' : '#e6f4ea', c.atraso ? '#a34600' : '#1e8e3e', true);
+        else if (c.pap) cell(x, y, dW, one ? '✓ Entregue' : '✓', '#e6f4ea', '#1e8e3e', true);
+        else if (c.status === 'Pendente') cell(x, y, dW, one ? '✗ PENDENTE' : '✗', '#fde7e5', '#d93025', true);
+        else if (c.status === 'No prazo') cell(x, y, dW, one ? '… no prazo' : '…', '#fff8e1', '#a36b00', true);
+        else cell(x, y, dW, ABREV[c.sit] || c.sit.slice(0, 3), '#f8f9fa', '#80868b', false);
+      });
+      y += rH;
+    });
+    y += 26; g.font = 'bold 15px Arial'; g.fillStyle = pk.length ? '#d93025' : '#1e8e3e';
+    pendLines.forEach(function (l) { g.fillText(l, 20, y); y += 22; g.font = '15px Arial'; });
+    g.font = '12px Arial'; g.fillStyle = '#5f6368';
+    g.fillText('✓ entregue · ✓ +Nd entregue com atraso · … no prazo', 20, y + 14);
+    g.fillText('✗ pendente (prazo: 12:00 do próximo dia de atividade) · DSR / FER / S/E / F.C / S/A = não cobra', 20, y + 32);
+    cv.toBlob(function (blob) {
+      var nome = 'Recebimento RDA ' + (days.length === 1 ? br(days[0]).replace(/\//g, '-') : br(days[0]).slice(0, 5).replace('/', '-') + ' a ' + br(days[days.length - 1]).replace(/\//g, '-')) + '.png';
+      var f = null; try { f = new File([blob], nome, { type: 'image/png' }); } catch (e) { }
+      if (f && navigator.canShare && navigator.canShare({ files: [f] })) navigator.share({ files: [f], title: nome }).catch(function () { download(blob, nome); });
+      else download(blob, nome);
+      done('Imagem pronta ✓');
+    }, 'image/png');
+  }
   function situacao(j, enc, d) {
     var e = j.encarregados.filter(function (x) { return x.nome === enc; })[0];
     var c = controle(j, e, d);
-    var b = sheetUI('<h3>' + esc(e.curto || e.nome) + ' · ' + br(d) + '</h3><p class="small muted">Situação operacional (igual à aba MASTER do seu controle). Em verde: cobra RDA.</p><div class="stgrid">' +
+    var b = sheetUI('<h3>' + esc(e.curto || e.nome) + ' · ' + br(d) + '</h3>' + (e.papel && !c.rda ? '<button class="btn block ok" data-v="ENTREGUE EM PAPEL" style="margin-bottom:10px">✓ Recebi o RDA</button>' : '') + '<p class="small muted">Situação operacional (igual à aba MASTER do seu controle). Em verde: cobra RDA.</p><div class="stgrid">' +
       j.listaSituacoes.map(function (s) { return '<button data-v="' + esc(s[0]) + '" style="background:' + (s[1] ? '#1e8e3e' : '#5f6368') + '" class="' + (s[0] === c.sit ? 'cur' : '') + '">' + esc(s[0]) + '</button>'; }).join('') +
       '</div><label class="f">Observação</label><input id="sobs" value="' + esc(c.obs) + '">');
     [].forEach.call(b.querySelectorAll('[data-v]'), function (x) {
@@ -357,18 +419,18 @@
       document.getElementById('toast').classList.add('hidden');
       var encs = j.encarregados || {}, eq = {};
       j.pessoas.forEach(function (p) { if (p.enc && p.enc !== j.livre && p.enc !== 'DESLIGADO') (eq[p.enc] = eq[p.enc] || []).push(p); });
-      var nomes = Object.keys(encs).filter(function (n) { return encs[n].ativo !== false; }).sort();
+      var nomes = Object.keys(encs).filter(function (n) { return encs[n].ativo !== false; }).sort(function (a, c) { return (encs[c].papel ? 1 : 0) - (encs[a].papel ? 1 : 0) || a.localeCompare(c); });
       var b = sheetUI('<h3>🖨 Em branco para imprimir</h3><p class="small muted">Para o encarregado que ainda preenche no papel. Sai com <b>nome, supervisor e a equipe atual</b> já impressos (o encarregado em primeiro) e o resto em branco, numa folha só.</p>' +
         '<label class="f">O que imprimir</label><select id="rbt"><option value="rda">RDA em branco</option><option value="he">Escala / permissão de hora extra em branco</option><option value="ambos">Os dois</option></select>' +
         '<label class="f">Buscar encarregado</label><input id="rbq" placeholder="Digite parte do nome">' +
         '<div id="rbl" style="max-height:46vh;overflow:auto;margin-top:6px"></div>' +
         '<label class="f">Folhas por encarregado</label><input type="number" id="rbn" min="1" max="31" value="1"><p class="small muted" style="margin-top:4px">Ex.: 6 para levar a semana toda impressa.</p>' +
         '<button class="btn block" id="rbok" style="margin-top:10px">Gerar PDF</button><button class="btn block ghost" id="rbno" style="margin-top:8px">Cancelar</button>');
-      var sel = {};
+      var sel = {}; nomes.forEach(function (n) { if (encs[n].papel) sel[n] = true; });
       var lista = function () {
         var q = norm(b.querySelector('#rbq').value);
         b.querySelector('#rbl').innerHTML = nomes.filter(function (n) { return !q || norm(n).indexOf(q) >= 0; }).map(function (n) {
-          return '<label class="person" style="cursor:pointer;padding:6px 0"><input type="checkbox" data-rb="' + esc(n) + '"' + (sel[n] ? ' checked' : '') + ' style="width:24px;height:24px;min-height:0;flex:0 0 24px"><div class="pinfo"><b style="font-size:15px">' + esc(n) + '</b><small>' + esc(encs[n].disciplina || '') + ' · ' + (eq[n] || []).length + ' pessoa(s)</small></div></label>';
+          return '<label class="person" style="cursor:pointer;padding:6px 0"><input type="checkbox" data-rb="' + esc(n) + '"' + (sel[n] ? ' checked' : '') + ' style="width:24px;height:24px;min-height:0;flex:0 0 24px"><div class="pinfo"><b style="font-size:15px">' + esc(n) + (encs[n].papel ? ' <span class="tag" style="background:#fff4e5;color:#a34600">📝 papel</span>' : '') + '</b><small>' + esc(encs[n].disciplina || '') + ' · ' + (eq[n] || []).length + ' pessoa(s)</small></div></label>';
         }).join('') || '<p class="empty">Nenhum encarregado</p>';
         [].forEach.call(b.querySelectorAll('[data-rb]'), function (c) { c.onchange = function () { sel[c.dataset.rb] = c.checked; }; });
       };
@@ -448,7 +510,7 @@
       for (var d = A.de; d <= A.ate; d = addDays(d, 1)) {
         j.encarregados.forEach(function (e) {
           var c = controle(j, e, d);
-          if (!e.cobra && !c.rda) return;
+          if (!e.cobra && !e.papel && !c.rda) return;
           ctl.push([c.via ? c.via.numero : c.numero, e.disciplina, e.curto || e.nome, br(d), DIAS_EXT[dow(d)], br(c.prevista) + ' 12:00', c.entrega ? br(c.entrega) : '', c.status, c.atraso, c.sit, c.cobra ? 'SIM' : 'NÃO', c.obs || '']);
         });
       }
@@ -770,6 +832,53 @@
     }).catch(function (e) { done('Erro: ' + e.message); });
   }
 
+  // a administração corrige um pedido de hora extra já enviado; o encarregado recebe a notificação com o que mudou
+  function heEditar(x) {
+    var pes = {}, ordem = [];
+    var add = function (p) { var k = String(p.chapa); if (!pes[k]) { pes[k] = { chapa: p.chapa, nome: p.nome, funcao: p.funcao || '', mo: p.mo || '' }; ordem.push(k); } };
+    (x.pessoas || []).forEach(add); (x.equipe || []).forEach(add);
+    var sel = {}; (x.pessoas || []).forEach(function (p) { sel[String(p.chapa)] = true; });
+    var b = sheetUI('<h3>✏️ Corrigir hora extra</h3><p class="small muted">' + esc(x.enc) + ' · pedido em ' + esc(String(x.pedidoEm || '').slice(0, 16)) + '. O encarregado recebe uma notificação com o que mudou. A situação (aprovado/pendente) não muda.</p>' +
+      '<div class="grid2"><div><label class="f">Data da atividade</label><input type="date" id="ed_d" value="' + esc(x.date) + '"></div><div><label class="f">Tipo</label><select id="ed_t"><option value="EXTENSÃO"' + (x.tipo !== 'ESCALA' ? ' selected' : '') + '>Extensão de horário</option><option value="ESCALA"' + (x.tipo === 'ESCALA' ? ' selected' : '') + '>Escala (dia não útil)</option></select></div></div>' +
+      '<div class="grid2"><div><label class="f">Início</label><input type="time" id="ed_i" value="' + esc(x.ini || '') + '"></div><div><label class="f">Término</label><input type="time" id="ed_f" value="' + esc(x.fim || '') + '"></div></div>' +
+      '<div class="grid2"><div><label class="f">Turno</label><select id="ed_tu"><option' + (x.turno !== 'NOTURNO' ? ' selected' : '') + '>DIURNO</option><option' + (x.turno === 'NOTURNO' ? ' selected' : '') + '>NOTURNO</option></select></div><div><label class="f">Área</label><input id="ed_a" value="' + esc(x.area || '') + '"></div></div>' +
+      '<label class="f">Atividade</label><textarea id="ed_m" rows="3">' + esc(x.motivo || '') + '</textarea>' +
+      '<label class="f">Pessoas (<span id="ed_n"></span>)</label><div id="ed_p" style="max-height:34vh;overflow:auto"></div>' +
+      '<input id="ed_q" placeholder="＋ Adicionar outra pessoa (nome ou chapa)" style="margin-top:6px"><div id="ed_r"></div>' +
+      '<label class="f">Recado para o encarregado (opcional)</label><input id="ed_msg" placeholder="Ex.: estava com a data de hoje, era para amanhã">' +
+      '<button class="btn block" id="ed_ok" style="margin-top:12px">Salvar correção e avisar o encarregado</button><button class="btn block ghost" id="ed_no" style="margin-top:8px">Cancelar</button>');
+    var desenha = function () {
+      b.querySelector('#ed_p').innerHTML = ordem.map(function (k) { var p = pes[k]; return '<label class="person" style="cursor:pointer;padding:5px 0"><input type="checkbox" data-pc="' + esc(k) + '"' + (sel[k] ? ' checked' : '') + ' style="width:24px;height:24px;min-height:0;flex:0 0 24px"><div class="pinfo"><b style="font-size:14px">' + esc(p.nome) + '</b><small>' + esc(k + ' · ' + p.funcao) + '</small></div></label>'; }).join('');
+      b.querySelector('#ed_n').textContent = Object.keys(sel).filter(function (k) { return sel[k]; }).length + ' marcada(s)';
+      [].forEach.call(b.querySelectorAll('[data-pc]'), function (c) { c.onchange = function () { sel[c.dataset.pc] = c.checked; b.querySelector('#ed_n').textContent = Object.keys(sel).filter(function (k) { return sel[k]; }).length + ' marcada(s)'; }; });
+    };
+    desenha();
+    var efe = null;
+    b.querySelector('#ed_q').oninput = function () {
+      var q = norm(this.value), r = b.querySelector('#ed_r');
+      if (q.length < 2) { r.innerHTML = ''; return; }
+      var mostra = function () {
+        r.innerHTML = efe.filter(function (p) { return p.enc !== 'DESLIGADO' && (norm(p.nome).indexOf(q) >= 0 || String(p.chapa).indexOf(q) === 0); }).slice(0, 8).map(function (p) { return '<div class="rdaline" data-ad="' + esc(p.chapa) + '" style="cursor:pointer"><div class="tx"><b>' + esc(p.nome) + '</b><small>' + esc(p.chapa + ' · ' + (p.funcao || '') + ' · ' + (p.enc || '')) + '</small></div><span class="link">＋</span></div>'; }).join('') || '<p class="small muted">Ninguém encontrado</p>';
+        [].forEach.call(r.querySelectorAll('[data-ad]'), function (d) { d.onclick = function () { var p = efe.filter(function (y) { return String(y.chapa) === d.dataset.ad; })[0]; add(p); sel[String(p.chapa)] = true; b.querySelector('#ed_q').value = ''; r.innerHTML = ''; desenha(); }; });
+      };
+      if (efe) return mostra();
+      r.innerHTML = '<p class="small muted">Carregando efetivo…</p>';
+      api('admin_quadro', {}, 120000).then(function (j) { efe = j.pessoas; mostra(); }).catch(function (e) { r.innerHTML = '<p class="small muted">Erro: ' + esc(e.message) + '</p>'; });
+    };
+    b.querySelector('#ed_no').onclick = closeUI;
+    b.querySelector('#ed_ok').onclick = function () {
+      var n = { date: b.querySelector('#ed_d').value, tipo: b.querySelector('#ed_t').value, ini: b.querySelector('#ed_i').value, fim: b.querySelector('#ed_f').value, turno: b.querySelector('#ed_tu').value,
+        area: b.querySelector('#ed_a').value.trim(), motivo: b.querySelector('#ed_m').value.trim(), pessoas: ordem.filter(function (k) { return sel[k]; }).map(function (k) { return pes[k]; }) };
+      if (!n.date) return done('Informe a data');
+      if (!n.ini || !n.fim || n.fim <= n.ini) return done('Horário inválido');
+      if (!n.pessoas.length) return done('Marque pelo menos uma pessoa');
+      closeUI(); busy('Salvando correção…');
+      api('admin_heEdit', { id: x.id, he: n, msg: b.querySelector('#ed_msg').value.trim() }).then(function (r) {
+        done(r.semMudanca ? 'Nada mudou' : 'Corrigido ✓ O encarregado foi avisado.'); A.heDate = n.date; horasExtras();
+      }).catch(function (e) { done('Erro: ' + e.message); });
+    };
+  }
+
   function horasExtras() {
     var el = document.getElementById('adm');
     A.heDate = A.heDate || addDays(today(), 1);
@@ -793,7 +902,8 @@
           '<div class="small muted">Pedido em ' + esc(String(x.pedidoEm || '').slice(0, 16)) + ' · ' + (x.noPrazo ? 'no prazo' : '<b style="color:var(--bad)">FORA DO PRAZO</b>') + '</div>' +
           '<div class="small" style="margin:6px 0">' + esc(x.motivo || '') + '</div><details><summary class="link">Ver pessoas</summary><div class="small">' + (x.pessoas || []).map(function (p) { return esc(p.chapa + ' – ' + p.nome + ' (' + (p.funcao || '') + ')'); }).join('<br>') + '</div></details>' +
           (x.obsAdmin ? '<div class="small muted">Obs.: ' + esc(x.obsAdmin) + '</div>' : '') +
-          '<div class="row" style="margin-top:8px"><button class="btn sm ok" data-ap="' + esc(x.id) + '">Aprovar</button><button class="btn sm danger" data-rp="' + esc(x.id) + '">Reprovar</button><button class="btn sm ghost" data-pp="' + esc(x.id) + '">PDF</button></div></div>';
+          '<div class="row" style="margin-top:8px"><button class="btn sm ok" data-ap="' + esc(x.id) + '">Aprovar</button><button class="btn sm danger" data-rp="' + esc(x.id) + '">Reprovar</button><button class="btn sm ghost" data-pp="' + esc(x.id) + '">PDF</button><button class="btn sm ghost" data-ed="' + esc(x.id) + '">✏️ Editar</button></div>' +
+          (x.editadoEm ? '<div class="small muted" style="margin-top:4px">✏️ Corrigido por ' + esc(x.editadoPor || 'administração') + ' em ' + esc(br(String(x.editadoEm).slice(0, 10)).slice(0, 5) + ' ' + String(x.editadoEm).slice(11, 16)) + '</div>' : '') + '</div>';
       }).join('') + (dia.length ? '' : '<p class="empty">Nenhum pedido para este dia</p>') + '</div>';
       document.getElementById('helst').innerHTML = h;
       var decide = function (ids, st) {
@@ -819,6 +929,7 @@
           });
         }).then(function () { done('PDF pronto ✓'); }).catch(function (e) { done('Erro: ' + e.message); });
       };
+      [].forEach.call(document.querySelectorAll('#helst [data-ed]'), function (b) { b.onclick = function () { heEditar(dia.filter(function (y) { return y.id === b.dataset.ed; })[0]); }; });
       [].forEach.call(document.querySelectorAll('[data-pp]'), function (b) { b.onclick = function () { var x = dia.filter(function (y) { return y.id === b.dataset.pp; })[0]; permPdf([x], A.heDate + ' - Permissão HE - ' + (x.curto || x.enc) + '.pdf'); }; });
       document.getElementById('pdfperm').onclick = function () { permPdf(dia.filter(function (x) { return x.status !== 'REPROVADO'; }), A.heDate + ' - Permissões de hora extra.pdf'); };
       document.getElementById('xlsesc').onclick = function () {
@@ -872,7 +983,7 @@
     var ativos = j.encarregados.filter(function (e) { return e.ativo && ok(e); }), inat = j.encarregados.filter(function (e) { return !e.ativo && ok(e); });
     var linha = function (e) {
       return '<div class="rdaline" data-ed="' + esc(e.nome) + '" style="cursor:pointer"><div class="tx"><b>' + esc(e.nome) + '</b><small>' + esc(e.curto) + ' · ' + esc(e.disciplina) + (e.supervisor ? ' · sup. ' + esc(e.supervisor) : '') + ' · ' + e.equipe + ' na equipe</small></div>' +
-        (e.modelo === 'MURO' ? '<span class="tag">Muro</span>' : '') + (e.armacao ? '<span class="tag" style="background:#e0f2f1;color:#00695c">🔩 Armação</span>' : '') + (e.ativo ? (e.cobra ? '<span class="tag" style="background:#e6f4ea;color:#1e8e3e">Cobra RDA</span>' : '<span class="tag">Não cobra</span>') : '') + '<span class="muted">›</span></div>';
+        (e.modelo === 'MURO' ? '<span class="tag">Muro</span>' : '') + (e.armacao ? '<span class="tag" style="background:#e0f2f1;color:#00695c">🔩 Armação</span>' : '') + (e.ativo ? (e.cobra ? '<span class="tag" style="background:#e6f4ea;color:#1e8e3e">Cobra RDA</span>' : e.papel ? '<span class="tag" style="background:#fff4e5;color:#a34600">📝 RDA em papel</span>' : '<span class="tag">Não cobra</span>') : '') + '<span class="muted">›</span></div>';
     };
     var grupos = {}; ativos.forEach(function (e) { (grupos[e.disciplina] = grupos[e.disciplina] || []).push(e); });
     var h = '<div class="card"><div class="row" style="align-items:center"><input id="ebusca" placeholder="🔍 Procurar" value="' + esc(f) + '"><button class="btn" id="enovo" style="flex:0 0 auto">＋ Novo</button></div>' +
@@ -897,11 +1008,11 @@
       '<label class="f">Disciplina</label><input id="cd" list="cdl" value="' + esc(e.disciplina) + '" autocapitalize="characters" placeholder="Escolha ou digite"><datalist id="cdl">' + j.disciplinas.map(function (d) { return '<option value="' + esc(d) + '">'; }).join('') + '</datalist>' +
       '<label class="f">Supervisor</label><input id="cs" list="csl" value="' + esc(e.supervisor) + '" autocapitalize="characters" placeholder="Escolha ou digite"><datalist id="csl">' + j.supervisores.map(function (d) { return '<option value="' + esc(d) + '">'; }).join('') + '</datalist>' +
       '<label class="f">Modelo de RDA</label><select id="cm"><option value="PADRAO"' + (e.modelo !== 'MURO' ? ' selected' : '') + '>Padrão</option><option value="MURO"' + (e.modelo === 'MURO' ? ' selected' : '') + '>Muro (fiadas)</option></select>' +
-      '<label class="person" style="cursor:pointer;margin-top:10px"><input type="checkbox" id="cb"' + (e.cobra ? ' checked' : '') + ' style="width:28px;height:28px;min-height:0;flex:0 0 28px"><div class="pinfo"><b>Cobrar RDA</b><small>Entra no controle de recebimento e recebe os alertas de prazo</small></div></label>' +
+      '<label class="f">Como faz o RDA</label><select id="cb"><option value="APP"' + (e.cobra ? ' selected' : '') + '>📱 Pelo app (cobra RDA e recebe alertas)</option><option value="PAPEL"' + (e.papel ? ' selected' : '') + '>📝 Em papel / manual (controle de entrega, sem alertas no app)</option><option value="NAO"' + (!e.cobra && !e.papel ? ' selected' : '') + '>Não faz RDA</option></select>' +
       '<label class="person" style="cursor:pointer;margin-top:10px"><input type="checkbox" id="carm"' + (e.armacao ? ' checked' : '') + ' style="width:28px;height:28px;min-height:0;flex:0 0 28px"><div class="pinfo"><b>🔩 Relatório de montagem de armação</b><small>Mostra o botão MONTAGEM DE ARMAÇÃO no RDA deste encarregado</small></div></label>' +
       '<div class="row" style="margin-top:14px">' + (novo ? '' : '<button class="btn ' + (e.ativo ? 'danger' : 'ghost') + '" id="cat">' + (e.ativo ? 'Desativar' : 'Reativar') + '</button>') + '<button class="btn" id="cok">' + (novo ? 'Cadastrar' : 'Salvar') + '</button></div>');
     var val = function () {
-      return { nome: b.querySelector('#cn').value, curto: b.querySelector('#cc').value, disciplina: b.querySelector('#cd').value, supervisor: b.querySelector('#cs').value, modelo: b.querySelector('#cm').value, cobra: b.querySelector('#cb').checked, armacao: b.querySelector('#carm').checked, ativo: e.ativo };
+      return { nome: b.querySelector('#cn').value, curto: b.querySelector('#cc').value, disciplina: b.querySelector('#cd').value, supervisor: b.querySelector('#cs').value, modelo: b.querySelector('#cm').value, cobra: b.querySelector('#cb').value === 'APP', papel: b.querySelector('#cb').value === 'PAPEL', armacao: b.querySelector('#carm').checked, ativo: e.ativo };
     };
     var enviar = function (v, hist) {
       busy('Salvando…');
@@ -1069,11 +1180,11 @@
     api('admin_list', { de: today(), ate: today() }).then(function (j) {
       done('');
       var encs = j.encarregados.slice().sort(function (a, b) { return (a.disciplina + a.nome).localeCompare(b.disciplina + b.nome); });
-      var b = sheetUI('<h3>👷 Quem faz RDA</h3><p class="small muted">Marcados: entram no controle de recebimento e recebem os alertas de prazo e os lembretes de hora extra.</p>' +
-        encs.map(function (e) { return '<label class="person" style="cursor:pointer"><input type="checkbox" data-cb="' + esc(e.nome) + '"' + (e.cobra ? ' checked' : '') + ' style="width:28px;height:28px;min-height:0;flex:0 0 28px"><div class="pinfo"><b>' + esc(e.nome) + '</b><small>' + esc(e.disciplina) + '</small></div></label>'; }).join('') +
+      var b = sheetUI('<h3>👷 Quem faz RDA</h3><p class="small muted"><b>📱 App</b>: entra no controle de recebimento e recebe os alertas de prazo e os lembretes de hora extra. <b>📝 Papel</b>: faz o RDA manual – continua no controle de recebimento (toque em “✓ Recebi” quando o papel chegar), mas não recebe alertas no app.</p>' +
+        encs.map(function (e) { var m = e.cobra ? 'APP' : e.papel ? 'PAPEL' : 'NAO'; return '<div class="person"><div class="pinfo"><b>' + esc(e.nome) + '</b><small>' + esc(e.disciplina) + '</small></div><select data-cb="' + esc(e.nome) + '" data-v="' + m + '" style="flex:0 0 120px;min-height:40px"><option value="APP"' + (m === 'APP' ? ' selected' : '') + '>📱 App</option><option value="PAPEL"' + (m === 'PAPEL' ? ' selected' : '') + '>📝 Papel</option><option value="NAO"' + (m === 'NAO' ? ' selected' : '') + '>Não faz</option></select></div>'; }).join('') +
         '<button class="btn block" style="margin-top:12px" onclick="document.getElementById(\'sheet\').classList.add(\'hidden\')">Fechar</button>');
       [].forEach.call(b.querySelectorAll('[data-cb]'), function (c) {
-        c.onchange = function () { api('admin_setCobra', { enc: c.dataset.cb, cobra: c.checked }).then(function () { done('Salvo ✓'); }).catch(function (e) { done('Erro: ' + e.message); c.checked = !c.checked; }); };
+        c.onchange = function () { var v = c.value; api('admin_setCobra', { enc: c.dataset.cb, modo: v, cobra: v === 'APP' }).then(function () { c.dataset.v = v; done('Salvo ✓'); }).catch(function (e) { done('Erro: ' + e.message); c.value = c.dataset.v; }); };
       });
     }).catch(function (e) { done('Erro: ' + e.message); });
   }
