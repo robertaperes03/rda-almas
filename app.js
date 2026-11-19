@@ -14,7 +14,7 @@
     { s: '12X36', w: false, c: '#00796b' }, { s: 'VERIFICAR', w: false, c: '#f9a825' }];
 
   var PREMARCA = ['FÉRIAS', 'ATESTADO', 'AFASTADO INSS', 'FOLGA DE CAMPO'];
-  window.APP_V = 'v20';
+  window.APP_V = 'v21';
   var S = { boot: null, me: null, key: '', draft: null, syncing: false, online: navigator.onLine, pending: 0, saveT: null };
   var $app = document.getElementById('app');
 
@@ -70,7 +70,11 @@
 
   function refreshBoot() {
     if (!navigator.onLine || !CFG.API_URL || !S.key) return Promise.resolve(false);
-    return api('bootstrap', { enc: S.me ? S.me.nome : '', refV: S.refs ? S.refs.v : '' }, 30000).then(function (b) {
+    var bv = S.boot && S.boot.v && S.boot.me === (S.me ? S.me.nome : '') ? S.boot.v : '';
+    return api('bootstrap', { enc: S.me ? S.me.nome : '', refV: S.refs ? S.refs.v : '', bootV: bv }, 30000).then(function (b) {
+      S.lastBoot = Date.now();
+      if (b.same) { S.online = true; return true; } // nada mudou: não baixa de novo
+      b.me = S.me ? S.me.nome : '';
       if (b.refs && !b.refs.same) { S.refs = b.refs; DB.put('kv', 'refs', b.refs); }
       delete b.refs;
       S.boot = b; S.online = true;
@@ -180,11 +184,16 @@
           var op = it.value;
           S.syncStep = op.type === 'team' ? 'mudança de equipe' : op.type === 'he' ? 'hora extra' : ''; setPill();
           var job = op.type === 'team' ? api('teamChange', { enc: op.enc, changes: op.changes }) : op.type === 'he' ? sendHe(op.heId) : sendRda(op.draftId);
-          return job.then(function () { return DB.del('queue', it.key); });
+          return job.then(function () { S.qtdEnviada = (S.qtdEnviada || 0) + 1; return DB.del('queue', it.key); });
         });
       });
       return chain;
-    }).then(function () { return refreshBoot(); }).then(function () { return refreshInbox(); })
+    }).then(function (enviou) {
+      // economia de internet: atualização completa só a cada 5 min (ou logo depois de enviar algo)
+      if (!S.qtdEnviada && S.lastBoot && Date.now() - S.lastBoot < 300000) return;
+      S.qtdEnviada = 0;
+      return refreshBoot().then(function () { return refreshInbox(); });
+    })
       .catch(function (e) { console.warn('sync', e); relataErro(S.syncStep || 'sincronizar', e); if (!/servidor/.test(e.message)) S.online = navigator.onLine; })
       .then(function () { S.syncing = false; S.syncStep = ''; return countPending(); })
       .then(function () { if (S.draft) { DB.get('drafts', S.draft.id).then(function (d) { if (d && S.draft && d.id === S.draft.id) { S.draft.state = d.state; S.draft.numero = d.numero; S.draft.enviadoEm = d.enviadoEm; updateHeadState(); } }); } });
@@ -203,15 +212,17 @@
   }
   // foto grande demais para internet fraca: reduz só a cópia que vai para o servidor
   function fotoEnvio(data) {
-    if (!data || data.length < 450000) return Promise.resolve(data);
+    if (!data || data.length < 260000) return Promise.resolve(data);
     return new Promise(function (res) {
       var im = new Image();
       im.onload = function () {
         try {
-          var k = Math.min(1, 1280 / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement('canvas');
+          var k = Math.min(1, 1280 / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement('canvas'); // 1280 px já fica nítido no PDF e no Drive
           c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
           c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
-          var o = c.toDataURL('image/jpeg', 0.7); res(o.length < data.length ? o : data);
+          var o = c.toDataURL('image/jpeg', 0.68);
+          if (o.length > 400000) { var k2 = Math.min(1, 1024 / Math.max(c.width, c.height)), c2 = document.createElement('canvas'); c2.width = Math.round(c.width * k2); c2.height = Math.round(c.height * k2); c2.getContext('2d').drawImage(c, 0, 0, c2.width, c2.height); o = c2.toDataURL('image/jpeg', 0.6); }
+          res(o.length < data.length ? o : data);
         } catch (e) { res(data); }
       };
       im.onerror = function () { res(data); };
@@ -1113,8 +1124,20 @@
   function heMerged() {
     return heLocal().then(function (loc) {
       var srv = {}; (S.boot.horasExtras || []).forEach(function (x) { srv[x.id] = x; });
-      loc.forEach(function (h) { var s2 = srv[h.id]; if (s2 && h.state === 'enviado') { h.status = s2.status; h.obsAdmin = s2.obs; } });
-      (S.boot.horasExtras || []).forEach(function (x) { if (!loc.some(function (h) { return h.id === x.id; })) loc.push({ id: x.id, tipo: x.tipo, date: x.date, ini: x.ini, fim: x.fim, status: x.status, obsAdmin: x.obs, state: 'enviado', pessoas: x.pessoas.map(function (c) { return { chapa: c }; }), remoto: true }); });
+      var corrigido = false;
+      loc.forEach(function (h) {
+        var s2 = srv[h.id]; if (!s2 || h.state !== 'enviado') return;
+        h.status = s2.status; h.obsAdmin = s2.obs;
+        // a administração corrigiu o pedido: o celular passa a mostrar (e reenviar, se for o caso) a versão corrigida
+        if (s2.editadoEm && s2.editadoEm !== h.editadoEm) {
+          h.editadoEm = s2.editadoEm; h.date = s2.date; h.tipo = s2.tipo; h.ini = s2.ini; h.fim = s2.fim;
+          if (s2.area != null) h.area = s2.area; if (s2.motivo != null) h.motivo = s2.motivo; if (s2.turno) h.turno = s2.turno;
+          if (s2.pes) { h.pessoas = s2.pes; h.sel = {}; s2.pes.forEach(function (x) { h.sel[x.chapa] = true; }); h.extras = null; }
+          corrigido = true;
+        }
+      });
+      if (corrigido) DB.put('kv', heKey(), loc.filter(function (h) { return !h.remoto; }));
+      (S.boot.horasExtras || []).forEach(function (x) { if (!loc.some(function (h) { return h.id === x.id; })) loc.push({ id: x.id, tipo: x.tipo, date: x.date, ini: x.ini, fim: x.fim, status: x.status, obsAdmin: x.obs, editadoEm: x.editadoEm, state: 'enviado', pessoas: x.pessoas.map(function (c) { return { chapa: c }; }), remoto: true }); });
       return loc.sort(function (a, b) { return a.date < b.date ? 1 : -1; });
     });
   }
@@ -1148,7 +1171,7 @@
     document.getElementById('henovo').onclick = function () { S.he = null; S.view = 'heform'; render(); };
     heMerged().then(function (l) {
       document.getElementById('helist').innerHTML = l.map(function (h) {
-        return '<div class="rdaline" data-he="' + esc(h.id) + '"><div class="tx"><b>' + br(h.date) + ' · ' + esc(h.tipo) + '</b><small>' + esc(h.ini) + ' às ' + esc(h.fim) + ' · ' + (h.pessoas || []).length + ' pessoa(s)' + (h.obsAdmin ? ' · Obs: ' + esc(h.obsAdmin) : '') + '</small><div style="margin-top:4px">' + heBadge(h) + '</div></div>' + (h.remoto ? '' : '<button class="btn sm ghost">Abrir</button>') + '</div>';
+        return '<div class="rdaline" data-he="' + esc(h.id) + '"><div class="tx"><b>' + br(h.date) + ' · ' + esc(h.tipo) + '</b><small>' + esc(h.ini) + ' às ' + esc(h.fim) + ' · ' + (h.pessoas || []).length + ' pessoa(s)' + (h.obsAdmin ? ' · Obs: ' + esc(h.obsAdmin) : '') + (h.editadoEm ? ' · <b style="color:var(--orange)">✏️ corrigido pela administração</b>' : '') + '</small><div style="margin-top:4px">' + heBadge(h) + '</div></div>' + (h.remoto ? '' : '<button class="btn sm ghost">Abrir</button>') + '</div>';
       }).join('') || '<p class="empty">Nenhum pedido ainda</p>';
       [].forEach.call(document.querySelectorAll('[data-he] button'), function (b) {
         b.onclick = function () { var id = b.closest('[data-he]').dataset.he; heLocal().then(function (loc) { S.he = loc.filter(function (x) { return x.id === id; })[0]; S.view = 'heform'; render(); }); };
