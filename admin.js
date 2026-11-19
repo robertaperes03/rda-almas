@@ -849,15 +849,19 @@
     var add = function (p) { var k = String(p.chapa); if (!pes[k]) { pes[k] = { chapa: p.chapa, nome: p.nome, funcao: p.funcao || '', mo: p.mo || '' }; ordem.push(k); } };
     (x.pessoas || []).forEach(add); (x.equipe || []).forEach(add);
     var sel = {}; (x.pessoas || []).forEach(function (p) { sel[String(p.chapa)] = true; });
-    var b = sheetUI('<h3>✏️ Corrigir hora extra</h3><p class="small muted">' + esc(x.enc) + ' · pedido em ' + esc(String(x.pedidoEm || '').slice(0, 16)) + '. O encarregado recebe uma notificação com o que mudou. A situação (aprovado/pendente) não muda.</p>' +
+    var b = sheetUI((x.novo ? '<h3>＋ Lançar escala / extensão</h3><p class="small muted">Para o pessoal do escritório (ADM) ou qualquer equipe. Entra nas listas, nos PDFs e na planilha como os pedidos do app.</p>' +
+        '<label class="f">Responsável / setor</label><input id="ed_enc" list="ed_encl" value="' + esc(x.enc) + '" autocapitalize="characters"><datalist id="ed_encl">' + (A.encNomes || []).map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>' +
+        '<label class="f">Situação</label><select id="ed_st"><option value="APROVADO">Já aprovado</option><option value="PENDENTE">Pendente (aprovar depois)</option></select>'
+      : '<h3>✏️ Corrigir hora extra</h3><p class="small muted">' + esc(x.enc) + ' · pedido em ' + esc(String(x.pedidoEm || '').slice(0, 16)) + '. O encarregado recebe uma notificação com o que mudou. A situação (aprovado/pendente) não muda.</p>') +
       '<div class="grid2"><div><label class="f">Data da atividade</label><input type="date" id="ed_d" value="' + esc(x.date) + '"></div><div><label class="f">Tipo</label><select id="ed_t"><option value="EXTENSÃO"' + (x.tipo !== 'ESCALA' ? ' selected' : '') + '>Extensão de horário</option><option value="ESCALA"' + (x.tipo === 'ESCALA' ? ' selected' : '') + '>Escala (dia não útil)</option></select></div></div>' +
       '<div class="grid2"><div><label class="f">Início</label><input type="time" id="ed_i" value="' + esc(x.ini || '') + '"></div><div><label class="f">Término</label><input type="time" id="ed_f" value="' + esc(x.fim || '') + '"></div></div>' +
       '<div class="grid2"><div><label class="f">Turno</label><select id="ed_tu"><option' + (x.turno !== 'NOTURNO' ? ' selected' : '') + '>DIURNO</option><option' + (x.turno === 'NOTURNO' ? ' selected' : '') + '>NOTURNO</option></select></div><div><label class="f">Área</label><input id="ed_a" value="' + esc(x.area || '') + '"></div></div>' +
       '<label class="f">Atividade</label><textarea id="ed_m" rows="3">' + esc(x.motivo || '') + '</textarea>' +
       '<label class="f">Pessoas (<span id="ed_n"></span>)</label><div id="ed_p" style="max-height:34vh;overflow:auto"></div>' +
       '<input id="ed_q" placeholder="＋ Adicionar outra pessoa (nome ou chapa)" style="margin-top:6px"><div id="ed_r"></div>' +
-      '<label class="f">Recado para o encarregado (opcional)</label><input id="ed_msg" placeholder="Ex.: estava com a data de hoje, era para amanhã">' +
-      '<button class="btn block" id="ed_ok" style="margin-top:12px">Salvar correção e avisar o encarregado</button><button class="btn block ghost" id="ed_no" style="margin-top:8px">Cancelar</button>');
+      (x.novo ? '' : '<label class="f">Recado para o encarregado (opcional)</label><input id="ed_msg" placeholder="Ex.: estava com a data de hoje, era para amanhã">') +
+      '<button class="btn block" id="ed_ok" style="margin-top:12px">' + (x.novo ? 'Lançar' : 'Salvar correção e avisar o encarregado') + '</button><button class="btn block ghost" id="ed_no" style="margin-top:8px">Cancelar</button>');
+    if (x.novo) b.querySelector('#ed_t').onchange = function () { var esc2 = this.value === 'ESCALA'; b.querySelector('#ed_i').value = esc2 ? '06:30' : '16:30'; b.querySelector('#ed_f').value = esc2 ? '15:30' : '18:30'; };
     var desenha = function () {
       b.querySelector('#ed_p').innerHTML = ordem.map(function (k) { var p = pes[k]; return '<label class="person" style="cursor:pointer;padding:5px 0"><input type="checkbox" data-pc="' + esc(k) + '"' + (sel[k] ? ' checked' : '') + ' style="width:24px;height:24px;min-height:0;flex:0 0 24px"><div class="pinfo"><b style="font-size:14px">' + esc(p.nome) + '</b><small>' + esc(k + ' · ' + p.funcao) + '</small></div></label>'; }).join('');
       b.querySelector('#ed_n').textContent = Object.keys(sel).filter(function (k) { return sel[k]; }).length + ' marcada(s)';
@@ -883,6 +887,11 @@
       if (!n.date) return done('Informe a data');
       if (!n.ini || !n.fim || n.fim <= n.ini) return done('Horário inválido');
       if (!n.pessoas.length) return done('Marque pelo menos uma pessoa');
+      if (x.novo) {
+        var enc = b.querySelector('#ed_enc').value.trim(); if (!enc) return done('Informe o responsável');
+        closeUI(); busy('Lançando…');
+        return api('admin_heCreate', { enc: enc, he: n, status: b.querySelector('#ed_st').value }).then(function () { done('Lançado ✓'); A.heDate = n.date; horasExtras(); }).catch(function (e) { done('Erro: ' + e.message); });
+      }
       closeUI(); busy('Salvando correção…');
       api('admin_heEdit', { id: x.id, he: n, msg: b.querySelector('#ed_msg').value.trim() }).then(function (r) {
         done(r.semMudanca ? 'Nada mudou' : 'Corrigido ✓ O encarregado foi avisado.'); A.heDate = n.date; horasExtras();
@@ -919,7 +928,7 @@
           return '<td class="ok" data-hq="' + k + '" title="Entregue">✓</td>';
         }).join('') + '</tr>';
       });
-      h += '</tbody></table></div><p class="small muted">✓ entregue · em branco = não entregou. Toque no dia para ver o pedido ou, para quem entrega em papel, marcar como entregue.</p></div>';
+      h += '</tbody></table></div><p class="small muted">✓ entregue · em branco = não entregou. Toque no dia para ver o pedido ou, se chegou em papel, marcar como entregue.</p></div>';
       document.getElementById('qbox').innerHTML = '<div class="kpis"><div><b>' + tot + '</b><small>entregues no período</small></div><div><b>' + encs.length + '</b><small>encarregados</small></div></div>' + h;
       [].forEach.call(document.querySelectorAll('[data-hq]'), function (td) {
         td.onclick = function () {
@@ -928,7 +937,7 @@
             (c.ped.length ? c.ped.map(function (x) { return '<div class="rdaline"><div class="tx"><b>' + (x.tipo === 'ESCALA' ? 'Escala' : 'Extensão') + ' · ' + esc(x.ini) + ' às ' + esc(x.fim) + '</b><small>' + (x.pessoas || []).length + ' pessoa(s) · ' + esc(String(x.status || '').toLowerCase()) + ' · pelo app</small></div></div>'; }).join('') : '') +
             c.pap.map(function (x) { return '<div class="rdaline"><div class="tx"><b>✓ Entregue</b><small>marcado em ' + esc(x.em) + '</small></div><button class="btn sm danger" data-rm="' + esc(x.tipo) + '">Desmarcar</button></div>'; }).join('') +
             (c.ped.length ? '<button class="btn block ghost" id="hqver" style="margin-top:8px">Abrir os pedidos deste dia</button>' : '') +
-            (e.papel && !c.pap.length ? '<button class="btn block ok" data-pp2="EXTENSÃO" style="margin-top:10px">✓ Marcar como entregue</button>' : (c.ok ? '' : '<p class="empty">Não entregou para este dia.</p>')) +
+            (!c.ok ? '<p class="small muted" style="margin-top:6px">Nada recebido pelo app neste dia. Se a escala/extensão chegou em papel:</p><button class="btn block ok" data-pp2="EXTENSÃO" style="margin-top:6px">✓ Marcar como entregue</button>' : '') +
             '<button class="btn block ghost" style="margin-top:10px" id="hqno">Fechar</button>');
           b.querySelector('#hqno').onclick = closeUI;
           var ver = b.querySelector('#hqver'); if (ver) ver.onclick = function () { closeUI(); A.heView = ''; A.heDate = d; horasExtras(); };
@@ -993,10 +1002,15 @@
     var el = document.getElementById('adm');
     A.heDate = A.heDate || addDays(today(), 1);
     if (A.heView === 'quadro') return heQuadro();
-    el.innerHTML = '<div class="card"><div class="row" style="align-items:end"><div><label class="f" style="margin-top:0">Dia da hora extra</label><input type="date" id="hd" value="' + A.heDate + '"></div><button class="btn" id="hdref" style="flex:0 0 auto">Atualizar</button></div><button class="btn sm ghost" id="hequad" style="margin-top:10px">🗓 Quadro de escalas e extensões entregues</button><div id="hepend"></div></div><div id="helst"><p class="empty">Carregando…</p></div><div id="hecfg"></div>';
+    el.innerHTML = '<div class="card"><div class="row" style="align-items:end"><div><label class="f" style="margin-top:0">Dia da hora extra</label><input type="date" id="hd" value="' + A.heDate + '"></div><button class="btn" id="hdref" style="flex:0 0 auto">Atualizar</button></div><button class="btn sm ghost" id="hequad" style="margin-top:10px">🗓 Quadro de escalas e extensões entregues</button><button class="btn sm" id="henovo2" style="margin-top:10px;margin-left:6px">＋ Lançar escala / extensão</button><div id="hepend"></div></div><div id="helst"><p class="empty">Carregando…</p></div><div id="hecfg"></div>';
     document.getElementById('hd').onchange = function () { A.heDate = this.value; horasExtras(); };
     document.getElementById('hdref').onclick = horasExtras;
     document.getElementById('hequad').onclick = function () { A.heView = 'quadro'; horasExtras(); };
+    document.getElementById('henovo2').onclick = function () {
+      var abre = function () { heEditar({ novo: true, enc: 'ADMINISTRAÇÃO', date: A.heDate, tipo: dow(A.heDate) === 0 || dow(A.heDate) === 6 ? 'ESCALA' : 'EXTENSÃO', ini: dow(A.heDate) === 0 || dow(A.heDate) === 6 ? '06:30' : '16:30', fim: dow(A.heDate) === 0 || dow(A.heDate) === 6 ? '15:30' : '18:30', turno: 'DIURNO', pessoas: [], equipe: [] }); };
+      if (A.encNomes) return abre();
+      api('admin_encList').then(function (r) { A.encNomes = ['ADMINISTRAÇÃO'].concat(r.encarregados.map(function (e) { return e.nome; })); abre(); }).catch(function () { A.encNomes = ['ADMINISTRAÇÃO']; abre(); });
+    };
     api('admin_heList', { de: addDays(today(), -15), ate: addDays(today(), 30) }).then(function (j) {
       var all = j.pedidos, dia = all.filter(function (h) { return h.date === A.heDate; }).sort(function (a, b) { return (a.disciplina + a.enc).localeCompare(b.disciplina + b.enc); });
       var pend = all.filter(function (h) { return h.status === 'PENDENTE' && h.date !== A.heDate; });
