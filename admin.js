@@ -192,20 +192,31 @@
   }
 
   /* ---------- Recebimento ---------- */
+  // período escolhido por datas (De / Até), com atalhos; no máximo 62 dias
+  function periodoUI(de, ate) {
+    return '<div class="grid2"><div><label class="f" style="margin-top:0">De</label><input type="date" id="pde2" value="' + de + '"></div><div><label class="f" style="margin-top:0">Até</label><input type="date" id="pate2" value="' + ate + '"></div></div>' +
+      '<div class="row" style="margin-top:6px;flex-wrap:wrap;gap:6px"><button class="btn sm ghost" data-pr="0">Só o dia</button><button class="btn sm ghost" data-pr="6">7 dias</button><button class="btn sm ghost" data-pr="14">15 dias</button><button class="btn sm ghost" data-pr="30">31 dias</button></div>';
+  }
+  function periodoBind(get, set, redraw) {
+    var fix = function (de, ate) { if (de > ate) { var t = de; de = ate; ate = t; } if (diffDias(de, ate) > 61) de = addDays(ate, -61); set(de, ate); redraw(); };
+    document.getElementById('pde2').onchange = function () { fix(this.value || get()[0], get()[1]); };
+    document.getElementById('pate2').onchange = function () { fix(get()[0], this.value || get()[1]); };
+    [].forEach.call(document.querySelectorAll('[data-pr]'), function (b) { b.onclick = function () { var ate = get()[1]; fix(addDays(ate, -(+b.dataset.pr)), ate); }; });
+  }
+  function diffDias(a, b) { return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000); }
+  function diasEntre(a, b) { var o = []; for (var d = a; d <= b; d = addDays(d, 1)) o.push(d); return o; }
   function entregas() {
     var el = document.getElementById('adm');
-    el.innerHTML = '<div class="card"><div class="row" style="align-items:end;flex-wrap:wrap"><div><label class="f" style="margin-top:0">Até o dia</label><input type="date" id="dd" value="' + A.date + '"></div>' +
-      '<div><label class="f" style="margin-top:0">Período</label><select id="per"><option value="1">Só o dia</option><option value="7">7 dias</option><option value="15">15 dias</option><option value="31">31 dias</option></select></div></div>' +
+    A.dIni = A.dIni || addDays(A.date, -6);
+    el.innerHTML = '<div class="card">' + periodoUI(A.dIni, A.date) +
       '<label class="chk"><input type="checkbox" id="todos"' + (A.todos ? ' checked' : '') + '> Mostrar também quem não entrega RDA</label><div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm ghost" id="quem">👷 Quem faz RDA</button><button class="btn sm" id="qimg">🖼 Imagem do quadro (para cobrar)</button></div></div><div id="ent"><p class="empty">Carregando…</p></div>';
-    document.getElementById('per').value = String(A.dias);
-    document.getElementById('dd').onchange = function () { A.date = this.value; entregas(); };
-    document.getElementById('per').onchange = function () { A.dias = +this.value; entregas(); };
+    periodoBind(function () { return [A.dIni, A.date]; }, function (de, ate) { A.dIni = de; A.date = ate; }, entregas);
     document.getElementById('todos').onchange = function () { A.todos = this.checked; entregas(); };
     document.getElementById('quem').onclick = quemFaz;
     document.getElementById('qimg').onclick = function () { done('Aguarde o quadro carregar'); };
-    var de = addDays(A.date, -(A.dias - 1));
+    var de = A.dIni;
     loadControle(de, A.date).then(function (j) {
-      var days = []; for (var i = A.dias - 1; i >= 0; i--) days.push(addDays(A.date, -i));
+      var days = diasEntre(A.dIni, A.date);
       var encs = j.encarregados.filter(function (e) { return A.todos || e.cobra || e.papel; });
       var hoje = encs.map(function (e) { return { e: e, c: controle(j, e, A.date) }; });
       var prevDia = hoje.filter(function (x) { return x.c.cobra; }).length, entDia = hoje.filter(function (x) { return x.c.rda || x.c.via || x.c.pap; }).length;
@@ -879,12 +890,113 @@
     };
   }
 
+  // quadro de escalas e extensões recebidas: ✓ quando chegou (pelo app ou em papel), em branco quando não veio. Não existe "pendente".
+  function heQuadro() {
+    var el = document.getElementById('adm');
+    A.heQDate = A.heQDate || today(); A.heQIni = A.heQIni || addDays(A.heQDate, -6);
+    el.innerHTML = '<div class="card">' + periodoUI(A.heQIni, A.heQDate) +
+      '<div class="row" style="margin-top:10px;flex-wrap:wrap"><button class="btn sm ghost" id="qvolta">‹ Pedidos do dia</button><button class="btn sm" id="qimg2">🖼 Imagem do quadro</button></div></div><div id="qbox"><p class="empty">Carregando…</p></div>';
+    periodoBind(function () { return [A.heQIni, A.heQDate]; }, function (de, ate) { A.heQIni = de; A.heQDate = ate; }, heQuadro);
+    document.getElementById('qvolta').onclick = function () { A.heView = ''; horasExtras(); };
+    document.getElementById('qimg2').onclick = function () { done('Aguarde o quadro carregar'); };
+    var days = diasEntre(A.heQIni, A.heQDate);
+    api('admin_heList', { de: days[0], ate: days[days.length - 1] }, 120000).then(function (j) {
+      var encs = (j.encs || []).slice().sort(function (a, b) { return (a.disciplina + a.nome).localeCompare(b.disciplina + b.nome); });
+      var cel = function (e, d) {
+        var ped = j.pedidos.filter(function (h) { return h.date === d && resolve(h.enc) === e.nome; });
+        var pap = (j.papel || []).filter(function (x) { return x.date === d && x.enc === e.nome; });
+        return { ped: ped, pap: pap, ok: ped.length + pap.length > 0 };
+      };
+      var resolve = function (n) { return n; };
+      var tp = function (t) { return t === 'ESCALA' ? 'ESC' : 'EXT'; };
+      var tot = 0;
+      var h = '<div class="card"><div class="card-h"><h2>Escalas e extensões entregues</h2></div><div class="tablewrap"><table class="ctl"><thead><tr><th>Encarregado</th><th>Entregues</th>' + days.map(function (d) { return '<th>' + DIAS[dow(d)] + '<br>' + br(d).slice(0, 5) + '</th>'; }).join('') + '</tr></thead><tbody>';
+      encs.forEach(function (e) {
+        var n = 0; days.forEach(function (d) { if (cel(e, d).ok) n++; }); tot += n;
+        h += '<tr><td class="nm">' + esc(e.curto || e.nome) + '<br><small class="muted">' + esc(e.disciplina) + '</small></td><td><b>' + n + '</b></td>' + days.map(function (d) {
+          var c = cel(e, d), k = esc(e.nome) + '|' + d;
+          if (!c.ok) return '<td data-hq="' + k + '"></td>';
+          return '<td class="ok" data-hq="' + k + '" title="Entregue">✓</td>';
+        }).join('') + '</tr>';
+      });
+      h += '</tbody></table></div><p class="small muted">✓ entregue · em branco = não entregou. Toque no dia para ver o pedido ou, para quem entrega em papel, marcar como entregue.</p></div>';
+      document.getElementById('qbox').innerHTML = '<div class="kpis"><div><b>' + tot + '</b><small>entregues no período</small></div><div><b>' + encs.length + '</b><small>encarregados</small></div></div>' + h;
+      [].forEach.call(document.querySelectorAll('[data-hq]'), function (td) {
+        td.onclick = function () {
+          var k = td.dataset.hq.split('|'), e = encs.filter(function (x) { return x.nome === k[0]; })[0], d = k[1], c = cel(e, d);
+          var b = sheetUI('<h3>' + esc(e.curto || e.nome) + ' · ' + br(d) + '</h3>' +
+            (c.ped.length ? c.ped.map(function (x) { return '<div class="rdaline"><div class="tx"><b>' + (x.tipo === 'ESCALA' ? 'Escala' : 'Extensão') + ' · ' + esc(x.ini) + ' às ' + esc(x.fim) + '</b><small>' + (x.pessoas || []).length + ' pessoa(s) · ' + esc(String(x.status || '').toLowerCase()) + ' · pelo app</small></div></div>'; }).join('') : '') +
+            c.pap.map(function (x) { return '<div class="rdaline"><div class="tx"><b>✓ Entregue</b><small>marcado em ' + esc(x.em) + '</small></div><button class="btn sm danger" data-rm="' + esc(x.tipo) + '">Desmarcar</button></div>'; }).join('') +
+            (c.ped.length ? '<button class="btn block ghost" id="hqver" style="margin-top:8px">Abrir os pedidos deste dia</button>' : '') +
+            (e.papel && !c.pap.length ? '<button class="btn block ok" data-pp2="EXTENSÃO" style="margin-top:10px">✓ Marcar como entregue</button>' : (c.ok ? '' : '<p class="empty">Não entregou para este dia.</p>')) +
+            '<button class="btn block ghost" style="margin-top:10px" id="hqno">Fechar</button>');
+          b.querySelector('#hqno').onclick = closeUI;
+          var ver = b.querySelector('#hqver'); if (ver) ver.onclick = function () { closeUI(); A.heView = ''; A.heDate = d; horasExtras(); };
+          var salva = function (tipo, rm) { busy('Salvando…'); api('admin_hePapel', { enc: e.nome, date: d, tipo: tipo, remove: rm }).then(function () { closeUI(); done(rm ? 'Desmarcado' : 'Recebido ✓'); heQuadro(); }).catch(function (er) { done('Erro: ' + er.message); }); };
+          [].forEach.call(b.querySelectorAll('[data-pp2]'), function (x) { x.onclick = function () { salva(x.dataset.pp2, false); }; });
+          [].forEach.call(b.querySelectorAll('[data-rm]'), function (x) { x.onclick = function () { salva(x.dataset.rm, true); }; });
+        };
+      });
+      document.getElementById('qimg2').onclick = function () {
+        desenhaQuadro({
+          titulo: 'Escalas e extensões entregues – ' + (days.length === 1 ? DIAS_EXT[dow(days[0])] + ', ' + br(days[0]) : br(days[0]).slice(0, 5) + ' a ' + br(days[days.length - 1])),
+          resumo: 'Entregues no período: ' + tot, col2: 'Entregues', days: days,
+          linhas: encs.map(function (e) {
+            var n = 0, cs = days.map(function (d) {
+              var c = cel(e, d); if (c.ok) n++;
+              if (!c.ok) return { t: '', bg: '#fff', fg: '#202124' };
+              return { t: days.length === 1 ? '✓ Entregue' : '✓', bg: '#e6f4ea', fg: '#1e8e3e', bold: true };
+            });
+            return { nome: e.curto || e.nome, tot: String(n), totCor: n ? '#1e8e3e' : '#80868b', cells: cs };
+          }),
+          rodape: [], legenda: ['✓ entregue · em branco = não entregou'],
+          arquivo: 'Escalas e extensoes ' + (days.length === 1 ? br(days[0]).replace(/\//g, '-') : br(days[0]).slice(0, 5).replace('/', '-') + ' a ' + br(days[days.length - 1]).replace(/\//g, '-')) + '.png'
+        });
+      };
+    }).catch(function (e) { document.getElementById('qbox').innerHTML = '<div class="alert bad">' + esc(e.message) + '</div>'; });
+  }
+  // desenha um quadro (tabela encarregado × dias) numa imagem PNG para compartilhar
+  function desenhaQuadro(o) {
+    var S2 = 2, nmW = 250, enW = 100, one = o.days.length === 1, dW = one ? 300 : 70, rH = 40, top = 118, W = nmW + enW + dW * o.days.length + 40;
+    var H = top + 34 + o.linhas.length * rH + 26 + o.rodape.length * 22 + o.legenda.length * 18 + 40;
+    var cv = document.createElement('canvas'); cv.width = W * S2; cv.height = H * S2; var g = cv.getContext('2d'); g.scale(S2, S2);
+    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.fillStyle = '#0b2a5b'; g.fillRect(0, 0, W, 64);
+    g.textBaseline = 'middle'; g.fillStyle = '#fff'; g.font = 'bold 21px Arial'; g.fillText(o.titulo, 20, 25);
+    g.font = '13px Arial'; g.fillText('PABH 059 25 · Projeto Almas – Britagem · gerado em ' + br(today()) + ' ' + new Date().toTimeString().slice(0, 5), 20, 48);
+    g.fillStyle = '#202124'; g.font = 'bold 15px Arial'; g.fillText(o.resumo, 20, 90);
+    var x0 = 20, y = top;
+    var cell = function (x, y2, w, txt, bg, fg, bold, al) {
+      g.fillStyle = bg; g.fillRect(x, y2, w, rH); g.strokeStyle = '#dadce0'; g.lineWidth = 1; g.strokeRect(x + .5, y2 + .5, w, rH);
+      g.fillStyle = fg; g.font = (bold ? 'bold ' : '') + (txt.length > 9 && !one && al !== 'left' ? '11px' : '14px') + ' Arial'; g.textAlign = al || 'center'; g.fillText(txt, al === 'left' ? x + 10 : x + w / 2, y2 + rH / 2, w - 8); g.textAlign = 'left';
+    };
+    cell(x0, y, nmW, 'Encarregado', '#eef1f6', '#0b2a5b', true, 'left'); cell(x0 + nmW, y, enW, o.col2, '#eef1f6', '#0b2a5b', true);
+    o.days.forEach(function (d, i) { cell(x0 + nmW + enW + i * dW, y, dW, (one ? DIAS[dow(d)] + ' ' : '') + br(d).slice(0, 5), '#eef1f6', '#0b2a5b', true); });
+    y += rH;
+    o.linhas.forEach(function (l) {
+      cell(x0, y, nmW, l.nome, '#fff', '#202124', true, 'left'); cell(x0 + nmW, y, enW, l.tot, '#fff', l.totCor || '#202124', true);
+      l.cells.forEach(function (c, i) { cell(x0 + nmW + enW + i * dW, y, dW, c.t, c.bg, c.fg, c.bold); });
+      y += rH;
+    });
+    y += 26; g.font = '15px Arial'; g.fillStyle = '#202124';
+    o.rodape.forEach(function (l) { g.fillText(l, 20, y); y += 22; });
+    g.font = '12px Arial'; g.fillStyle = '#5f6368';
+    o.legenda.forEach(function (l) { g.fillText(l, 20, y); y += 18; });
+    cv.toBlob(function (blob) {
+      var f = null; try { f = new File([blob], o.arquivo, { type: 'image/png' }); } catch (e) { }
+      if (f && navigator.canShare && navigator.canShare({ files: [f] })) navigator.share({ files: [f], title: o.arquivo }).catch(function () { download(blob, o.arquivo); });
+      else download(blob, o.arquivo);
+      done('Imagem pronta ✓');
+    }, 'image/png');
+  }
+
   function horasExtras() {
     var el = document.getElementById('adm');
     A.heDate = A.heDate || addDays(today(), 1);
-    el.innerHTML = '<div class="card"><div class="row" style="align-items:end"><div><label class="f" style="margin-top:0">Dia da hora extra</label><input type="date" id="hd" value="' + A.heDate + '"></div><button class="btn" id="hdref" style="flex:0 0 auto">Atualizar</button></div><div id="hepend"></div></div><div id="helst"><p class="empty">Carregando…</p></div><div id="hecfg"></div>';
+    if (A.heView === 'quadro') return heQuadro();
+    el.innerHTML = '<div class="card"><div class="row" style="align-items:end"><div><label class="f" style="margin-top:0">Dia da hora extra</label><input type="date" id="hd" value="' + A.heDate + '"></div><button class="btn" id="hdref" style="flex:0 0 auto">Atualizar</button></div><button class="btn sm ghost" id="hequad" style="margin-top:10px">🗓 Quadro de escalas e extensões entregues</button><div id="hepend"></div></div><div id="helst"><p class="empty">Carregando…</p></div><div id="hecfg"></div>';
     document.getElementById('hd').onchange = function () { A.heDate = this.value; horasExtras(); };
     document.getElementById('hdref').onclick = horasExtras;
+    document.getElementById('hequad').onclick = function () { A.heView = 'quadro'; horasExtras(); };
     api('admin_heList', { de: addDays(today(), -15), ate: addDays(today(), 30) }).then(function (j) {
       var all = j.pedidos, dia = all.filter(function (h) { return h.date === A.heDate; }).sort(function (a, b) { return (a.disciplina + a.enc).localeCompare(b.disciplina + b.enc); });
       var pend = all.filter(function (h) { return h.status === 'PENDENTE' && h.date !== A.heDate; });
